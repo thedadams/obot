@@ -55,7 +55,7 @@ func mcpServerTool(ctx context.Context, thread *v1.Thread, gptClient *gptscript.
 
 func MCPServerToolWithCreds(mcpServer v1.MCPServer, credEnv map[string]string, allowedTools ...string) (gptscript.ToolDef, error) {
 	serverConfig := mcp.ServerConfig{
-			ServerConfig: gmcp.ServerConfig{
+		ServerConfig: gmcp.ServerConfig{
 			DisableInstruction: false,
 			Command:            mcpServer.Spec.Manifest.Command,
 			Args:               mcpServer.Spec.Manifest.Args,
