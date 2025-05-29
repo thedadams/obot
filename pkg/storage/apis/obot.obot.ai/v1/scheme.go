@@ -83,6 +83,8 @@ func AddToSchemeWithGV(scheme *runtime.Scheme, schemeGroupVersion schema.GroupVe
 		&SlackReceiverList{},
 		&UserDelete{},
 		&UserDeleteList{},
+		&OAuthClient{},
+		&OAuthClientList{},
 	); err != nil {
 		return err
 	}
