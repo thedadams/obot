@@ -89,6 +89,8 @@ func AddToSchemeWithGV(scheme *runtime.Scheme, schemeGroupVersion schema.GroupVe
 		&OAuthAuthRequestList{},
 		&OAuthToken{},
 		&OAuthTokenList{},
+		&OAuthAppAuth{},
+		&OAuthAppAuthList{},
 	); err != nil {
 		return err
 	}

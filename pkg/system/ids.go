@@ -31,6 +31,7 @@ const (
 	UserDeletePrefix          = "ud1"
 	MCPServerPrefix           = "ms1"
 	OAuthClientPrefix         = "oc1"
+	OAuthAuthRequestPrefix    = "oar1"
 )
 
 func IsThreadID(id string) bool {
