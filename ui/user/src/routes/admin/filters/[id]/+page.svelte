@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import Layout from '$lib/components/Layout.svelte';
 	import FilterForm from '$lib/components/admin/FilterForm.svelte';
+	import McpServerK8sInfo from '$lib/components/admin/McpServerK8sInfo.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants.js';
 	import type { MCPFilter } from '$lib/services/admin/types';
 	import { profile } from '$lib/stores';
@@ -17,8 +18,7 @@
 	const tabs = [
 		{ label: 'Configuration', view: 'configuration' },
 		{ label: 'Server Details', view: 'server-details' },
-		{ label: 'Audit Logs', view: 'audit-logs' },
-		{ label: 'Usage', view: 'usage' }
+		{ label: 'Audit Logs', view: 'audit-logs' }
 	];
 
 	function handleSelectionChange(newSelection: string) {
@@ -42,7 +42,7 @@
 		in:fly={{ x: 100, duration }}
 		out:fly={{ x: -100, duration }}
 	>
-		<div class="flex flex-1 gap-2 py-1 text-sm font-light">
+		<div class="flex flex-1 gap-2 py-1 text-sm font-light max-h-11.5">
 			{#each tabs as tab (tab.view)}
 				<button
 					onclick={() => {
@@ -69,7 +69,20 @@
 				readonly={profile.current.isAdminReadonly?.()}
 			/>
 		{:else if selected === 'server-details'}
-			<!-- server details view -->
+			<div class="flex flex-col gap-6">
+				<McpServerK8sInfo
+					id={filter.id}
+					entity="webhook-validation"
+					mcpServerId={filter.id}
+					name={filter.name || ''}
+					connectedUsers={[]}
+					title="Details"
+					classes={{
+						title: 'text-lg font-semibold'
+					}}
+					readonly={profile.current.isAdminReadonly?.()}
+				/>
+			</div>
 		{:else if selected === 'audit-logs'}
 			<!-- <AuditLogs /> -->
 		{:else if selected === 'usage'}

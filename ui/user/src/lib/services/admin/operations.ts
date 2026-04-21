@@ -1035,8 +1035,8 @@ export async function launchMCPWebhookValidation(id: string): Promise<{
 export async function revealMCPWebhookValidation(
 	id: string,
 	opts?: { dontLogErrors?: boolean }
-): Promise<void> {
-	(await doPost(`/mcp-webhook-validations/${id}/reveal`, {}, opts)) as Promise<
+): Promise<Record<string, string>> {
+	return doPost(`/mcp-webhook-validations/${id}/reveal`, {}, opts) as Promise<
 		Record<string, string>
 	>;
 }
@@ -1052,8 +1052,8 @@ export async function getMCPWebhookValidationDetails(
 	id: string,
 	opts?: { fetch?: Fetcher; dontLogErrors?: boolean }
 ) {
-	const response = (await doGet(`/mcp-webhook-validations/${id}/details`, opts)) as MCPFilter;
-	return response as unknown;
+	const response = (await doGet(`/mcp-webhook-validations/${id}/details`, opts)) as K8sServerDetail;
+	return response;
 }
 
 export async function listCatalogCategories(catalogId: string, opts?: { fetch?: Fetcher }) {
