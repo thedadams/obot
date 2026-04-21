@@ -6,17 +6,26 @@
 		type MCPFilter,
 		type MCPFilterManifest,
 		type MCPFilterResource,
-		type MCPFilterWebhookSelector
+		type MCPFilterWebhookSelector,
+		type Runtime,
+		type RuntimeFormData
 	} from '$lib/services';
 	import { removeSecret } from '$lib/services/admin/operations';
+	import { validateRuntimeForm } from '$lib/services/chat/mcp';
 	import { mcpServersAndEntries } from '$lib/stores';
 	import { goto } from '$lib/url';
 	import Confirm from '../Confirm.svelte';
+	import Select from '../Select.svelte';
+	import ContainerizedRuntimeForm from '../mcp/ContainerizedRuntimeForm.svelte';
+	import CustomConfigurationForm from '../mcp/CustomConfigurationForm.svelte';
+	import NpxRuntimeForm from '../mcp/NpxRuntimeForm.svelte';
+	import RemoteRuntimeForm from '../mcp/RemoteRuntimeForm.svelte';
+	import UvxRuntimeForm from '../mcp/UvxRuntimeForm.svelte';
 	import Table from '../table/Table.svelte';
 	import SearchMcpServers from './SearchMcpServers.svelte';
 	import { Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from 'lucide-svelte';
 	import { untrack, type Snippet } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { fly, slide } from 'svelte/transition';
 
 	interface Props {
 		topContent?: Snippet;
@@ -54,6 +63,17 @@
 		)
 	);
 
+	let runtimeFormData = $state<RuntimeFormData | undefined>(
+		untrack(() => convertToRuntimeFormData(initialFilter))
+	);
+	let showRuntimeRequired = $state<Record<string, boolean>>({});
+	const runtimeOptions = [
+		{ id: 'webhook-url', label: 'Webhook URL' },
+		{ id: 'npx', label: 'NPX' },
+		{ id: 'uvx', label: 'UVX' },
+		{ id: 'containerized', label: 'Containerized' }
+	];
+
 	let saving = $state<boolean | undefined>();
 	let addMcpServerDialog = $state<ReturnType<typeof SearchMcpServers>>();
 	let deletingFilter = $state(false);
@@ -73,6 +93,58 @@
 		}
 		return [];
 	});
+
+	function convertToRuntimeFormData(filter?: MCPFilter): RuntimeFormData | undefined {
+		if (!filter || !filter.mcpServerManifest) {
+			return undefined;
+		} else {
+			const manifest = filter.mcpServerManifest;
+			const formData: RuntimeFormData = {
+				categories: manifest.metadata?.categories?.split(',').filter((c) => c.trim()) ?? [''],
+				icon: manifest.icon ?? '',
+				name: manifest.name ?? '',
+				description: manifest.description ?? '',
+				env: manifest.env?.map((env) => ({ ...env, value: '' })) ?? [],
+				runtime: manifest.runtime ?? 'npx',
+				npxConfig: undefined,
+				uvxConfig: undefined,
+				containerizedConfig: undefined,
+				remoteConfig: undefined,
+				remoteServerConfig: undefined,
+				compositeConfig: undefined,
+				compositeServerConfig: undefined
+			};
+
+			// Initialize the appropriate runtime config based on the runtime type
+			switch (manifest.runtime) {
+				case 'npx':
+					formData.npxConfig = manifest.npxConfig || { package: '', args: [] };
+					break;
+				case 'uvx':
+					formData.uvxConfig = manifest.uvxConfig || { package: '', command: '', args: [] };
+					break;
+				case 'containerized':
+					formData.containerizedConfig = manifest.containerizedConfig || {
+						image: '',
+						port: 0,
+						path: '',
+						command: '',
+						args: []
+					};
+					break;
+				case 'remote':
+					formData.remoteServerConfig = manifest.remoteConfig
+						? {
+								url: manifest.remoteConfig.fixedURL ?? '',
+								headers: manifest.remoteConfig.headers?.map((h) => ({ ...h, value: '' })) ?? []
+							}
+						: { url: '', headers: [] };
+					break;
+			}
+
+			return formData;
+		}
+	}
 
 	function convertMcpServersToTableData(resources: { id: string; type: string }[]) {
 		return resources.map((resource) => {
@@ -147,6 +219,70 @@
 			removingSecret = false;
 		}
 	}
+
+	function handleRuntimeChange(option: { id: string; label: string }) {
+		if (option.id === 'webhook-url') {
+			runtimeFormData = undefined;
+			return;
+		}
+
+		const newRuntime = option.id as Runtime;
+		if (!runtimeFormData) {
+			runtimeFormData = {
+				categories: [''],
+				name: '',
+				description: '',
+				env: [],
+				icon: '',
+				runtime: 'npx' as Runtime,
+				npxConfig: { package: '', args: [] },
+				uvxConfig: undefined,
+				containerizedConfig: undefined,
+				remoteConfig: undefined,
+				remoteServerConfig: undefined,
+				compositeConfig: undefined,
+				compositeServerConfig: undefined
+			};
+		}
+		runtimeFormData.runtime = newRuntime;
+
+		// Clear all runtime configs first
+		runtimeFormData.npxConfig = undefined;
+		runtimeFormData.uvxConfig = undefined;
+		runtimeFormData.containerizedConfig = undefined;
+		runtimeFormData.remoteConfig = undefined;
+		runtimeFormData.remoteServerConfig = undefined;
+
+		// Initialize the appropriate config based on the new runtime
+		switch (newRuntime) {
+			case 'npx':
+				runtimeFormData.npxConfig = { package: '', args: [] };
+				break;
+			case 'uvx':
+				runtimeFormData.uvxConfig = { package: '', command: '', args: [] };
+				break;
+			case 'containerized':
+				runtimeFormData.containerizedConfig = {
+					image: '',
+					port: 0,
+					path: '',
+					command: '',
+					args: []
+				};
+				break;
+			case 'remote':
+				// For remote servers (catalog entries), use remoteConfig
+				runtimeFormData.remoteConfig = { fixedURL: '', headers: [] };
+				break;
+			case 'composite':
+				runtimeFormData.compositeConfig = { componentServers: [] };
+				break;
+		}
+	}
+
+	function handleUpdateRequired(field: string) {
+		delete showRuntimeRequired[field];
+	}
 </script>
 
 <div
@@ -198,21 +334,17 @@
 				</div>
 
 				<div class="flex flex-col gap-2">
-					<label for="webhook-url" class="flex-1 text-sm font-light capitalize">
-						Webhook URL
-					</label>
-					<input
-						id="webhook-url"
-						bind:value={filter.url}
-						class="text-input-filled mt-0.5 {urlError
-							? 'border-red-500 focus:border-red-500 focus:ring-red-500'
-							: ''}"
-						required
-						disabled={readonly}
-					/>
-					{#if urlError}
-						<p class="text-xs text-red-600 dark:text-red-400">Webhook URL is required</p>
-					{/if}
+					<label for="runtime-selector" class="text-sm font-light">Type</label>
+					<div class="w-full">
+						<Select
+							id="runtime-selector"
+							class="bg-surface1 dark:bg-surface2 dark:border-surface3 flex-1 border border-transparent shadow-inner"
+							options={runtimeOptions}
+							selected={runtimeFormData ? runtimeFormData.runtime : 'webhook-url'}
+							onSelect={handleRuntimeChange}
+							disabled={readonly}
+						/>
+					</div>
 				</div>
 
 				<div class="flex flex-col gap-2">
@@ -259,7 +391,7 @@
 							{#if !readonly}
 								<button
 									type="button"
-									class="button-destructive flex-shrink-0 text-xs"
+									class="button-destructive shrink-0 text-xs"
 									disabled={removingSecret || saving}
 									onclick={handleRemoveSecret}
 								>
@@ -281,7 +413,67 @@
 			</div>
 		</div>
 
-		<div class="flex flex-col gap-2">
+		{#if !runtimeFormData}
+			<div
+				class="dark:bg-surface1 dark:border-surface3 bg-background flex flex-col gap-8 rounded-lg border border-transparent p-4 shadow-sm"
+			>
+				<div class="flex flex-col gap-2">
+					<label for="webhook-url" class="flex-1 text-sm font-light capitalize">
+						Webhook URL
+					</label>
+					<input
+						id="webhook-url"
+						bind:value={filter.url}
+						class="text-input-filled mt-0.5 {urlError
+							? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+							: ''}"
+						required
+						disabled={readonly}
+					/>
+					{#if urlError}
+						<p class="text-xs text-red-600 dark:text-red-400">Webhook URL is required</p>
+					{/if}
+				</div>
+			</div>
+		{:else if runtimeFormData}
+			{#if runtimeFormData.runtime === 'npx' && runtimeFormData.npxConfig}
+				<NpxRuntimeForm
+					bind:config={runtimeFormData.npxConfig}
+					{readonly}
+					showRequired={showRuntimeRequired}
+					onFieldChange={handleUpdateRequired}
+				/>
+			{:else if runtimeFormData.runtime === 'uvx' && runtimeFormData.uvxConfig}
+				<UvxRuntimeForm
+					bind:config={runtimeFormData.uvxConfig}
+					{readonly}
+					showRequired={showRuntimeRequired}
+					onFieldChange={handleUpdateRequired}
+				/>
+			{:else if runtimeFormData.runtime === 'containerized' && runtimeFormData.containerizedConfig}
+				<ContainerizedRuntimeForm
+					bind:config={runtimeFormData.containerizedConfig}
+					{readonly}
+					showRequired={showRuntimeRequired}
+					onFieldChange={handleUpdateRequired}
+				/>
+			{:else if runtimeFormData.runtime === 'remote' && runtimeFormData.remoteConfig}
+				<RemoteRuntimeForm
+					bind:config={runtimeFormData.remoteConfig}
+					{readonly}
+					showRequired={showRuntimeRequired}
+					onFieldChange={handleUpdateRequired}
+					isNewEntry={!filter}
+					onConfigureOAuth={() => {}}
+				/>
+			{/if}
+
+			{#if runtimeFormData.runtime !== 'remote'}
+				<CustomConfigurationForm bind:config={runtimeFormData.env} {readonly} />
+			{/if}
+		{/if}
+
+		<div class="flex flex-col gap-2 mt-4">
 			<div class="mb-2 flex items-center justify-between">
 				<div class="flex flex-col gap-1">
 					<h2 class="text-lg font-semibold">Selectors</h2>
@@ -457,6 +649,15 @@
 						if (!filter.name.trim() || !filter.url.trim()) {
 							showValidation = true;
 							return;
+						}
+
+						if (runtimeFormData) {
+							showRuntimeRequired = {}; // reset
+							const missingRequiredFields = validateRuntimeForm(runtimeFormData, 'multi');
+							if (Object.keys(missingRequiredFields).length > 0) {
+								showRuntimeRequired = missingRequiredFields;
+								return;
+							}
 						}
 
 						saving = true;

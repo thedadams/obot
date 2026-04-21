@@ -12,7 +12,8 @@ import {
 	type MCPSubField,
 	type OrgUser,
 	type Project,
-	type ProjectMCP
+	type ProjectMCP,
+	type RuntimeFormData
 } from '..';
 
 export interface MCPServerInfo extends MCPServer {
@@ -499,4 +500,64 @@ export const getMcpServerDeploymentStatus = (
 	}
 
 	return { updateStatus, updatesAvailable, updateStatusTooltip };
+};
+
+export const validateRuntimeForm = (
+	formData: RuntimeFormData,
+	type: LaunchServerType
+): Record<string, boolean> => {
+	const missingFields: Record<string, boolean> = {};
+	// Basic validation - name is required
+	if (!formData.name.trim()) {
+		missingFields.name = true;
+	}
+
+	// Runtime-specific validation
+	switch (formData.runtime) {
+		case 'npx':
+			if (!formData.npxConfig?.package?.trim()) {
+				missingFields.package = true;
+			}
+			break;
+		case 'uvx':
+			if (!formData.uvxConfig?.package?.trim()) {
+				missingFields.package = true;
+			}
+			break;
+		case 'containerized':
+			if (!formData.containerizedConfig?.image?.trim()) {
+				missingFields.image = true;
+			}
+			if (!formData.containerizedConfig?.path?.trim()) {
+				missingFields.path = true;
+			}
+			if ((formData.containerizedConfig?.port ?? 0) <= 0) {
+				missingFields.port = true;
+			}
+			break;
+		case 'remote':
+			if (type === 'remote') {
+				// For remote catalog entries, one of fixedURL, hostname, or urlTemplate is required
+				if (
+					!formData.remoteConfig?.fixedURL?.trim() &&
+					!formData.remoteConfig?.hostname?.trim() &&
+					!formData.remoteConfig?.urlTemplate?.trim()
+				) {
+					missingFields.fixedURL = true;
+					missingFields.hostname = true;
+					missingFields.urlTemplate = true;
+				}
+				break;
+			} else {
+				// For multi-user servers with remote runtime, URL is required
+				if (!formData.remoteServerConfig?.url?.trim()) {
+					missingFields.url = true;
+				}
+				break;
+			}
+		default:
+			break;
+	}
+
+	return missingFields;
 };
