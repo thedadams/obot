@@ -84,7 +84,7 @@
 		}
 
 		if (entity === 'webhook-validation') {
-			return `/api/webhook-validations/${mcpServerId}/logs`;
+			return `/api/mcp-webhook-validations/${mcpServerId}/logs`;
 		}
 
 		return `/api/mcp-servers/${mcpServerId}/logs`;
@@ -189,7 +189,9 @@
 							mcpServerId
 						)
 					: ChatService.restartWorkspaceK8sServerDeployment(entityId, mcpServerId)
-				: AdminService.restartK8sDeployment(mcpServerId));
+				: entity === 'webhook-validation'
+					? AdminService.restartMCPWebhookValidation(mcpServerId)
+					: AdminService.restartK8sDeployment(mcpServerId));
 			// Refresh the k8s info after restart
 			listK8sInfo = getK8sInfo();
 		} catch (err) {
@@ -522,7 +524,7 @@
 	onClear={() => (messages = [])}
 />
 
-{#if hasAdminAccess}
+{#if hasAdminAccess && entity !== 'webhook-validation'}
 	<div>
 		<h2 class="mb-2 text-lg font-semibold">Connected Users</h2>
 		<Table data={connectedUsers ?? []} fields={['name']}>
