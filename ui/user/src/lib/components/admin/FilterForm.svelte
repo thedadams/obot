@@ -26,7 +26,7 @@
 	import Table from '../table/Table.svelte';
 	import SearchMcpServers from './SearchMcpServers.svelte';
 	import { Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from 'lucide-svelte';
-	import { untrack, type Snippet } from 'svelte';
+	import { onMount, untrack, type Snippet } from 'svelte';
 	import { fly } from 'svelte/transition';
 
 	interface Props {
@@ -96,6 +96,12 @@
 		return [];
 	});
 
+	onMount(() => {
+		if (initialFilter?.id) {
+			revealServerValues();
+		}
+	});
+
 	function toIdSafeToolName(name: string): string {
 		const slug = name
 			.trim()
@@ -103,6 +109,47 @@
 			.replace(/[^a-z0-9]+/g, '-')
 			.replace(/^-+|-+$/g, '');
 		return slug || 'webhook-tool';
+	}
+
+	async function revealServerValues() {
+		if (!initialFilter?.id) return;
+		try {
+			const response = await AdminService.revealMCPWebhookValidation(initialFilter.id);
+
+			// Update environment variables with revealed values
+			if (runtimeFormData?.env) {
+				runtimeFormData.env = runtimeFormData.env.map((env) => ({
+					...env,
+					value: response[env.key] ?? ''
+				}));
+			}
+
+			// Update headers in the appropriate runtime config based on runtime type
+			if (runtimeFormData?.runtime === 'remote') {
+				if (runtimeFormData.remoteConfig?.headers) {
+					runtimeFormData.remoteConfig.headers = runtimeFormData.remoteConfig.headers.map(
+						(header) => ({
+							...header,
+							value: response[header.key] ?? ''
+						})
+					);
+				}
+				if (runtimeFormData.remoteServerConfig?.headers) {
+					runtimeFormData.remoteServerConfig.headers =
+						runtimeFormData.remoteServerConfig.headers.map((header) => ({
+							...header,
+							value: response[header.key] ?? ''
+						}));
+				}
+			}
+		} catch (error) {
+			if (error instanceof Error && error.message.includes('404')) {
+				// ignore, 404 means no credentials were set
+				return;
+			}
+			// Re-throw other errors
+			throw error;
+		}
 	}
 
 	function convertToRuntimeFormData(filter?: MCPFilter): RuntimeFormData | undefined {
@@ -357,6 +404,30 @@
 						/>
 					</div>
 				</div>
+			</div>
+		</div>
+
+		{#if !runtimeFormData}
+			<div
+				class="dark:bg-surface1 dark:border-surface3 bg-background flex flex-col gap-8 rounded-lg border border-transparent p-4 shadow-sm"
+			>
+				<div class="flex flex-col gap-2">
+					<label for="webhook-url" class="flex-1 text-sm font-light capitalize">
+						Webhook URL
+					</label>
+					<input
+						id="webhook-url"
+						bind:value={filter.url}
+						class="text-input-filled mt-0.5 {urlError
+							? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+							: ''}"
+						required
+						disabled={readonly}
+					/>
+					{#if urlError}
+						<p class="text-xs text-red-600 dark:text-red-400">Webhook URL is required</p>
+					{/if}
+				</div>
 
 				<div class="flex flex-col gap-2">
 					<label for="webhook-secret" class="flex-1 text-sm font-light capitalize">
@@ -422,30 +493,6 @@
 					{/if}
 				</div>
 			</div>
-		</div>
-
-		{#if !runtimeFormData}
-			<div
-				class="dark:bg-surface1 dark:border-surface3 bg-background flex flex-col gap-8 rounded-lg border border-transparent p-4 shadow-sm"
-			>
-				<div class="flex flex-col gap-2">
-					<label for="webhook-url" class="flex-1 text-sm font-light capitalize">
-						Webhook URL
-					</label>
-					<input
-						id="webhook-url"
-						bind:value={filter.url}
-						class="text-input-filled mt-0.5 {urlError
-							? 'border-red-500 focus:border-red-500 focus:ring-red-500'
-							: ''}"
-						required
-						disabled={readonly}
-					/>
-					{#if urlError}
-						<p class="text-xs text-red-600 dark:text-red-400">Webhook URL is required</p>
-					{/if}
-				</div>
-			</div>
 		{:else if runtimeFormData}
 			{#if runtimeFormData.runtime === 'npx' && runtimeFormData.npxConfig}
 				<NpxRuntimeForm
@@ -480,7 +527,7 @@
 			{/if}
 
 			{#if runtimeFormData.runtime !== 'remote'}
-				<CustomConfigurationForm bind:config={runtimeFormData.env} {readonly} type="single" />
+				<CustomConfigurationForm bind:config={runtimeFormData.env} {readonly} type="multi" />
 			{/if}
 		{/if}
 
