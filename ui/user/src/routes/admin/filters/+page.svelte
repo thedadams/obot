@@ -40,7 +40,7 @@
 
 	async function refresh() {
 		loading = true;
-		filters = await AdminService.listMCPFilters();
+		filters = await AdminService.listMCPWebhookValidations();
 		loading = false;
 	}
 
@@ -199,7 +199,7 @@
 	show={!!filterToDelete}
 	onsuccess={async () => {
 		if (!filterToDelete) return;
-		await AdminService.deleteMCPFilter(filterToDelete.id);
+		await AdminService.deleteMCPWebhookValidation(filterToDelete.id);
 		await refresh();
 		filterToDelete = undefined;
 	}}

@@ -8,7 +8,7 @@ export const load: PageLoad = async ({ fetch }) => {
 	let filters: MCPFilter[] = [];
 
 	try {
-		filters = await AdminService.listMCPFilters({ fetch });
+		filters = await AdminService.listMCPWebhookValidations({ fetch });
 	} catch (err) {
 		handleRouteError(err, '/admin/filters', profile.current);
 	}

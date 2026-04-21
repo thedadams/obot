@@ -10,8 +10,10 @@
 		type Runtime,
 		type RuntimeFormData
 	} from '$lib/services';
-	import { removeSecret } from '$lib/services/admin/operations';
-	import { validateRuntimeForm } from '$lib/services/chat/mcp';
+	import {
+		convertServerRuntimeFormDataToManifest,
+		validateRuntimeForm
+	} from '$lib/services/chat/mcp';
 	import { mcpServersAndEntries } from '$lib/stores';
 	import { goto } from '$lib/url';
 	import Confirm from '../Confirm.svelte';
@@ -25,7 +27,7 @@
 	import SearchMcpServers from './SearchMcpServers.svelte';
 	import { Eye, EyeOff, LoaderCircle, Plus, Trash2, X } from 'lucide-svelte';
 	import { untrack, type Snippet } from 'svelte';
-	import { fly, slide } from 'svelte/transition';
+	import { fly } from 'svelte/transition';
 
 	interface Props {
 		topContent?: Snippet;
@@ -93,6 +95,15 @@
 		}
 		return [];
 	});
+
+	function toIdSafeToolName(name: string): string {
+		const slug = name
+			.trim()
+			.toLocaleLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-+|-+$/g, '');
+		return slug || 'webhook-tool';
+	}
 
 	function convertToRuntimeFormData(filter?: MCPFilter): RuntimeFormData | undefined {
 		if (!filter || !filter.mcpServerManifest) {
@@ -208,7 +219,7 @@
 
 		removingSecret = true;
 		try {
-			await removeSecret(initialFilter.id);
+			await AdminService.deconfigureMCPWebhookValidation(initialFilter.id);
 			// Clear the secret field and update the filter state
 			filter.secret = '';
 			// Update the initial filter to reflect that it no longer has a secret
@@ -469,7 +480,7 @@
 			{/if}
 
 			{#if runtimeFormData.runtime !== 'remote'}
-				<CustomConfigurationForm bind:config={runtimeFormData.env} {readonly} />
+				<CustomConfigurationForm bind:config={runtimeFormData.env} {readonly} type="single" />
 			{/if}
 		{/if}
 
@@ -646,22 +657,29 @@
 					disabled={saving}
 					onclick={async () => {
 						// Show validation errors if required fields are missing
-						if (!filter.name.trim() || !filter.url.trim()) {
+						if (!filter.name.trim() || (!runtimeFormData && !filter.url.trim())) {
 							showValidation = true;
 							return;
 						}
 
 						if (runtimeFormData) {
+							console.log('runtimeFormData', runtimeFormData);
 							showRuntimeRequired = {}; // reset
-							const missingRequiredFields = validateRuntimeForm(runtimeFormData, 'multi');
+							const missingRequiredFields = validateRuntimeForm(runtimeFormData, 'multi', true);
 							if (Object.keys(missingRequiredFields).length > 0) {
 								showRuntimeRequired = missingRequiredFields;
+								console.log('missingRequiredFields', missingRequiredFields);
 								return;
 							}
 						}
 
 						saving = true;
 						try {
+							const mcpServerManifest = runtimeFormData
+								? convertServerRuntimeFormDataToManifest(runtimeFormData)
+								: undefined;
+
+							console.log('mcpServerManifest', mcpServerManifest);
 							const manifest: MCPFilterManifest = {
 								name: filter.name,
 								resources: filter.resources,
@@ -675,16 +693,49 @@
 													identifiers: s.identifiers?.filter((id) => id.trim()) || []
 												}))
 												.filter((s) => s.method || (s.identifiers && s.identifiers.length > 0))
-										: undefined
+										: undefined,
+								toolName: mcpServerManifest?.manifest ? toIdSafeToolName(filter.name) : undefined,
+								mcpServerManifest: mcpServerManifest?.manifest
 							};
 
 							let result: MCPFilter;
 							if (initialFilter) {
-								result = await AdminService.updateMCPFilter(initialFilter.id, manifest);
+								result = await AdminService.updateMCPWebhookValidation(initialFilter.id, manifest);
 								onUpdate?.(result);
 							} else {
-								result = await AdminService.createMCPFilter(manifest);
+								result = await AdminService.createMCPWebhookValidation(manifest);
 								onCreate?.(result);
+							}
+
+							if (mcpServerManifest) {
+								let configValues: Record<string, string> = {};
+								// Add environment variables
+								if (mcpServerManifest.manifest.env) {
+									const envValues = Object.fromEntries(
+										mcpServerManifest.manifest.env
+											.filter((env) => env.key && env.value) // Only include env vars with both key and value
+											.map((env) => [env.key, env.value])
+									);
+									configValues = { ...configValues, ...envValues };
+								}
+
+								// Add headers from remote config (only for remote runtime)
+								if (
+									mcpServerManifest.manifest.runtime === 'remote' &&
+									mcpServerManifest.manifest.remoteConfig?.headers
+								) {
+									const headerValues = Object.fromEntries(
+										mcpServerManifest.manifest.remoteConfig.headers
+											.filter((header) => header.key && header.value) // Only include headers with both key and value
+											.map((header) => [header.key, header.value])
+									);
+									configValues = { ...configValues, ...headerValues };
+								}
+
+								// Configure the server with the collected values if any exist
+								if (Object.keys(configValues).length > 0) {
+									await AdminService.configureMCPWebhookValidation(result.id, configValues);
+								}
 							}
 						} finally {
 							saving = false;
@@ -737,7 +788,7 @@
 	show={deletingFilter}
 	onsuccess={async () => {
 		if (!initialFilter) return;
-		await AdminService.deleteMCPFilter(initialFilter.id);
+		await AdminService.deleteMCPWebhookValidation(initialFilter.id);
 		goto('/admin/filters');
 	}}
 	oncancel={() => (deletingFilter = false)}

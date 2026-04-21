@@ -4,10 +4,13 @@
 		type MCPCatalogEntry,
 		type RuntimeFormData,
 		type MCPCatalogEntryServerManifest,
-		type MCPCatalogServerManifest,
 		Group
 	} from '$lib/services/admin/types';
-	import { validateRuntimeForm } from '$lib/services/chat/mcp';
+	import {
+		convertCategoriesToMetadata,
+		convertServerRuntimeFormDataToManifest,
+		validateRuntimeForm
+	} from '$lib/services/chat/mcp';
 	import type { LaunchServerType, Runtime } from '$lib/services/chat/types';
 	import { profile } from '$lib/stores';
 	import MarkdownInput from '../MarkdownInput.svelte';
@@ -277,17 +280,6 @@
 		}
 	});
 
-	function convertCategoriesToMetadata(categories: string[]) {
-		const validCategories = categories.filter((c) => c);
-		return validCategories
-			? {
-					metadata: {
-						categories: validCategories.join(',')
-					}
-				}
-			: undefined;
-	}
-
 	function convertToEntryManifest(formData: RuntimeFormData): MCPCatalogEntryServerManifest {
 		const { categories, ...baseData } = formData;
 
@@ -354,64 +346,6 @@
 		return manifest;
 	}
 
-	function convertToServerManifest(formData: RuntimeFormData): MCPCatalogServerManifest {
-		const { categories, ...baseData } = formData;
-
-		// Build base manifest structure for server
-		const serverManifest: MCPCatalogServerManifest = {
-			manifest: {
-				name: baseData.name,
-				description: baseData.description,
-				icon: baseData.icon,
-				env: baseData.env,
-				runtime: baseData.runtime,
-				...convertCategoriesToMetadata(categories)
-			}
-		};
-
-		// Add runtime-specific config based on the runtime type
-		switch (baseData.runtime) {
-			case 'npx':
-				if (baseData.npxConfig) {
-					serverManifest.manifest.npxConfig = {
-						package: baseData.npxConfig.package,
-						args: baseData.npxConfig.args?.filter((arg) => arg.trim()) || []
-					};
-				}
-				break;
-			case 'uvx':
-				if (baseData.uvxConfig) {
-					serverManifest.manifest.uvxConfig = {
-						package: baseData.uvxConfig.package,
-						command: baseData.uvxConfig.command || undefined,
-						args: baseData.uvxConfig.args?.filter((arg) => arg.trim()) || []
-					};
-				}
-				break;
-			case 'containerized':
-				if (baseData.containerizedConfig) {
-					serverManifest.manifest.containerizedConfig = {
-						image: baseData.containerizedConfig.image,
-						port: baseData.containerizedConfig.port,
-						path: baseData.containerizedConfig.path,
-						command: baseData.containerizedConfig.command || undefined,
-						args: baseData.containerizedConfig.args?.filter((arg) => arg.trim()) || []
-					};
-				}
-				break;
-			case 'remote':
-				if (baseData.remoteServerConfig) {
-					serverManifest.manifest.remoteConfig = {
-						url: baseData.remoteServerConfig.url,
-						headers: baseData.remoteServerConfig.headers || []
-					};
-				}
-				break;
-		}
-
-		return serverManifest;
-	}
-
 	async function handleEntrySubmit(id: string) {
 		const manifest = convertToEntryManifest(formData);
 
@@ -435,7 +369,7 @@
 	}
 
 	async function handleServerSubmit(id: string) {
-		const serverManifest = convertToServerManifest(formData);
+		const serverManifest = convertServerRuntimeFormDataToManifest(formData);
 
 		let response: MCPCatalogServer;
 		if (entry) {

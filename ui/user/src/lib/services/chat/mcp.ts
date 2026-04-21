@@ -7,6 +7,7 @@ import {
 	type LaunchServerType,
 	type MCPCatalogEntry,
 	type MCPCatalogServer,
+	type MCPCatalogServerManifest,
 	type MCPServer,
 	type MCPServerInstance,
 	type MCPSubField,
@@ -504,11 +505,12 @@ export const getMcpServerDeploymentStatus = (
 
 export const validateRuntimeForm = (
 	formData: RuntimeFormData,
-	type: LaunchServerType
+	type: LaunchServerType,
+	nameNotRequired: boolean = false
 ): Record<string, boolean> => {
 	const missingFields: Record<string, boolean> = {};
 	// Basic validation - name is required
-	if (!formData.name.trim()) {
+	if (!nameNotRequired && !formData.name.trim()) {
 		missingFields.name = true;
 	}
 
@@ -560,4 +562,75 @@ export const validateRuntimeForm = (
 	}
 
 	return missingFields;
+};
+
+export const convertCategoriesToMetadata = (categories: string[]) => {
+	const validCategories = categories.filter((c) => c);
+	return validCategories
+		? {
+				metadata: {
+					categories: validCategories.join(',')
+				}
+			}
+		: undefined;
+};
+
+export const convertServerRuntimeFormDataToManifest = (
+	formData: RuntimeFormData
+): MCPCatalogServerManifest => {
+	const { categories, ...baseData } = formData;
+
+	// Build base manifest structure for server
+	const serverManifest: MCPCatalogServerManifest = {
+		manifest: {
+			name: baseData.name,
+			description: baseData.description,
+			icon: baseData.icon,
+			env: baseData.env,
+			runtime: baseData.runtime,
+			...convertCategoriesToMetadata(categories)
+		}
+	};
+
+	// Add runtime-specific config based on the runtime type
+	switch (baseData.runtime) {
+		case 'npx':
+			if (baseData.npxConfig) {
+				serverManifest.manifest.npxConfig = {
+					package: baseData.npxConfig.package,
+					args: baseData.npxConfig.args?.filter((arg) => arg.trim()) || []
+				};
+			}
+			break;
+		case 'uvx':
+			if (baseData.uvxConfig) {
+				serverManifest.manifest.uvxConfig = {
+					package: baseData.uvxConfig.package,
+					command: baseData.uvxConfig.command || undefined,
+					args: baseData.uvxConfig.args?.filter((arg) => arg.trim()) || []
+				};
+			}
+			break;
+		case 'containerized':
+			if (baseData.containerizedConfig) {
+				serverManifest.manifest.containerizedConfig = {
+					image: baseData.containerizedConfig.image,
+					port: baseData.containerizedConfig.port,
+					path: baseData.containerizedConfig.path,
+					command: baseData.containerizedConfig.command || undefined,
+					args: baseData.containerizedConfig.args?.filter((arg) => arg.trim()) || []
+				};
+			}
+			break;
+		case 'remote':
+			if (baseData.remoteServerConfig) {
+				serverManifest.manifest.remoteConfig = {
+					url: baseData.remoteServerConfig.url,
+					headers: baseData.remoteServerConfig.headers || []
+				};
+			}
+			break;
+	}
+
+	return serverManifest;
 };

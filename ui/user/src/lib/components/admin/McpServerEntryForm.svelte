@@ -192,7 +192,7 @@
 					: AdminService.listAccessControlRules();
 		} else if (selected === 'filters' && entity !== 'workspace') {
 			// add filters back in for workspace once supported for workspace
-			listFilters = AdminService.listMCPFilters();
+			listFilters = AdminService.listMCPWebhookValidations();
 		}
 	});
 
