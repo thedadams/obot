@@ -710,12 +710,10 @@
 						}
 
 						if (runtimeFormData) {
-							console.log('runtimeFormData', runtimeFormData);
 							showRuntimeRequired = {}; // reset
 							const missingRequiredFields = validateRuntimeForm(runtimeFormData, 'multi', true);
 							if (Object.keys(missingRequiredFields).length > 0) {
 								showRuntimeRequired = missingRequiredFields;
-								console.log('missingRequiredFields', missingRequiredFields);
 								return;
 							}
 						}
@@ -726,7 +724,6 @@
 								? convertServerRuntimeFormDataToManifest(runtimeFormData)
 								: undefined;
 
-							console.log('mcpServerManifest', mcpServerManifest);
 							const manifest: MCPFilterManifest = {
 								name: filter.name,
 								resources: filter.resources,

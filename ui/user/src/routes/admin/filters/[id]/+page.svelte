@@ -19,7 +19,7 @@
 
 	const tabs = [
 		{ label: 'Configuration', view: 'configuration' },
-		{ label: 'Server Details', view: 'server-details' },
+		{ label: 'Server Details', view: 'server-details' }
 	];
 
 	function handleSelectionChange(newSelection: string) {
@@ -29,10 +29,6 @@
 			goto(url, { replaceState: true });
 		}
 	}
-
-	$effect(() => {
-		console.log({ filter });
-	});
 
 	const duration = PAGE_TRANSITION_DURATION;
 </script>
