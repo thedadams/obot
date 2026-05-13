@@ -64,7 +64,7 @@ type ToolReferenceSpec struct {
 	Active         *bool                   `json:"active,omitempty"`
 	Bundle         bool                    `json:"bundle,omitempty"`
 	BundleToolName string                  `json:"bundleToolName,omitempty"`
-	ForceRefresh   metav1.Time             `json:"forceRefresh,omitempty"`
+	ForceRefresh   metav1.Time             `json:"forceRefresh,omitzero"`
 }
 
 type ToolShortDescription struct {

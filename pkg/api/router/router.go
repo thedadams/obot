@@ -19,20 +19,24 @@ import (
 func Router(ctx context.Context, services *services.Services) (http.Handler, error) {
 	mux := services.APIServer
 
-	version, err := handlers.NewVersionHandler(ctx,
-		services.GatewayClient,
-		services.EmailServerName,
-		services.PostgresDSN,
-		services.MCPRuntimeBackend,
-		services.MCPNetworkPolicyEnabled,
-		services.MCPDefaultDenyAllEgress,
-		services.SupportDocker,
-		services.AuthEnabled,
-		services.DisableUpdateCheck,
-		services.DisableLegacyChat,
-		services.AutonomousToolUseEnabled,
-		services.NanobotIntegration,
-		services.MessagePoliciesEnabled)
+	version, err := handlers.NewVersionHandler(ctx, handlers.VersionHandlerOptions{
+		GatewayClient:            services.GatewayClient,
+		GPTClient:                services.GPTClient,
+		StorageClient:            services.StorageClient,
+		LicenseProvider:          services.LicenseProvider,
+		EmailDomain:              services.EmailServerName,
+		PostgresDSN:              services.PostgresDSN,
+		Engine:                   services.MCPRuntimeBackend,
+		MCPNetworkPolicyEnabled:  services.MCPNetworkPolicyEnabled,
+		MCPDefaultDenyAllEgress:  services.MCPDefaultDenyAllEgress,
+		SupportDocker:            services.SupportDocker,
+		AuthEnabled:              services.AuthEnabled,
+		DisableUpdateCheck:       services.DisableUpdateCheck,
+		DisableLegacyChat:        services.DisableLegacyChat,
+		AutonomousToolUseEnabled: services.AutonomousToolUseEnabled,
+		NanobotIntegration:       services.NanobotIntegration,
+		MessagePoliciesEnabled:   services.MessagePoliciesEnabled,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +50,7 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	invoker := handlers.NewInvokeHandler(services.Invoker, services.MCPLoader)
 	threads := handlers.NewThreadHandler(services.ProviderDispatcher, services.Events, services.ModelAccessPolicyHelper)
 	runs := handlers.NewRunHandler(services.Events)
-	toolRefs := handlers.NewToolReferenceHandler()
+	toolRefs := handlers.NewToolReferenceHandler(services.LicenseProvider)
 	cronJobs := handlers.NewCronJobHandler()
 	models := handlers.NewModelHandler(services.ModelAccessPolicyHelper)
 	mcpCatalogs := handlers.NewMCPCatalogHandler(services.DefaultMCPCatalogPath, services.ServerURL, services.MCPRuntimeBackend, services.MCPLoader, oauthChecker, services.GatewayClient, services.AccessControlRuleHelper)
@@ -57,14 +61,14 @@ func Router(ctx context.Context, services *services.Services) (http.Handler, err
 	skills := handlers.NewSkillHandler(services.SkillAccessRuleHelper)
 	powerUserWorkspaces := handlers.NewPowerUserWorkspaceHandler(services.ServerURL, services.AccessControlRuleHelper)
 	mcpWebhookValidations := handlers.NewMCPWebhookValidationHandler(services.MCPLoader)
-	availableModels := handlers.NewAvailableModelsHandler(services.ProviderDispatcher)
-	modelProviders := handlers.NewModelProviderHandler(services.ProviderDispatcher, services.Invoker)
+	availableModels := handlers.NewAvailableModelsHandler(services.ProviderDispatcher, services.LicenseProvider)
+	modelProviders := handlers.NewModelProviderHandler(services.ProviderDispatcher, services.Invoker, services.LicenseProvider)
 	modelAccessPolicies := handlers.NewModelAccessPolicyHandler()
 	messagePolicies := handlers.NewMessagePolicyHandler()
 	policyViolations := handlers.NewMessagePolicyViolationHandler()
 	deviceScans := handlers.NewDeviceScansHandler()
-	authProviders := handlers.NewAuthProviderHandler(services.ProviderDispatcher, services.PostgresDSN)
-	fileScannerProviders := handlers.NewFileScannerProviderHandler(services.ProviderDispatcher, services.Invoker)
+	authProviders := handlers.NewAuthProviderHandler(services.ProviderDispatcher, services.PostgresDSN, services.LicenseProvider)
+	fileScannerProviders := handlers.NewFileScannerProviderHandler(services.ProviderDispatcher, services.Invoker, services.LicenseProvider)
 	prompt := handlers.NewPromptHandler()
 	confirm := handlers.NewConfirmHandler()
 	defaultModelAliases := handlers.NewDefaultModelAliasHandler()

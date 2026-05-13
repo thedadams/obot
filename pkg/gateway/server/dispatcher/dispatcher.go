@@ -15,6 +15,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api/handlers/providers"
 	"github.com/obot-platform/obot/pkg/gateway/client"
 	"github.com/obot-platform/obot/pkg/invoke"
+	"github.com/obot-platform/obot/pkg/license"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,9 +36,10 @@ type Dispatcher struct {
 	modelURLs            map[string]url.URL
 	fileScannerLock      *sync.RWMutex
 	fileScannerURLs      map[string]url.URL
+	licenseProvider      *license.KeygenProvider
 }
 
-func New(invoker *invoke.Invoker, c kclient.Client, gptscriptClient *gptscript.GPTScript, gatewayClient *client.Client, postgresDSN string) *Dispatcher {
+func New(invoker *invoke.Invoker, c kclient.Client, gptscriptClient *gptscript.GPTScript, gatewayClient *client.Client, postgresDSN string, licenseProvider *license.KeygenProvider) *Dispatcher {
 	d := &Dispatcher{
 		invoker:         invoker,
 		client:          c,
@@ -49,6 +51,7 @@ func New(invoker *invoke.Invoker, c kclient.Client, gptscriptClient *gptscript.G
 		authURLs:        make(map[string]url.URL),
 		fileScannerLock: new(sync.RWMutex),
 		fileScannerURLs: make(map[string]url.URL),
+		licenseProvider: licenseProvider,
 	}
 
 	if postgresDSN != "" {
@@ -239,7 +242,7 @@ func (d *Dispatcher) isAuthProviderConfigured(ctx context.Context, gptscriptClie
 		return false
 	}
 
-	aps, err := providers.ConvertAuthProviderToolRef(toolRef, credEnv)
+	aps, err := providers.ConvertAuthProviderToolRef(toolRef, credEnv, d.licenseProvider)
 	if err != nil {
 		return false
 	}

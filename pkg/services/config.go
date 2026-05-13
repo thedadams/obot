@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/google/uuid"
 	"github.com/gptscript-ai/go-gptscript"
 	"github.com/gptscript-ai/gptscript/pkg/cache"
 	gptscriptai "github.com/gptscript-ai/gptscript/pkg/gptscript"
@@ -47,6 +48,7 @@ import (
 	"github.com/obot-platform/obot/pkg/imagepullsecrets"
 	"github.com/obot-platform/obot/pkg/invoke"
 	"github.com/obot-platform/obot/pkg/jwt/persistent"
+	"github.com/obot-platform/obot/pkg/license"
 	"github.com/obot-platform/obot/pkg/logutil"
 	"github.com/obot-platform/obot/pkg/mcp"
 	"github.com/obot-platform/obot/pkg/messagepolicy"
@@ -80,7 +82,17 @@ import (
 	_ "github.com/obot-platform/nah/pkg/logrus"
 )
 
+const licenseMachineIDPropertyKey = "obot-license-machine-id"
+
 var pkgLog = logger.Package()
+
+func ensureLicenseMachineID(ctx context.Context, gatewayClient *client.Client) (string, error) {
+	property, err := gatewayClient.GetOrCreateProperty(ctx, licenseMachineIDPropertyKey, uuid.NewString())
+	if err != nil {
+		return "", err
+	}
+	return property.Value, nil
+}
 
 type (
 	GatewayConfig     gserver.Options
@@ -88,6 +100,7 @@ type (
 	RateLimiterConfig ratelimiter.Options
 	EncryptionConfig  encryption.Options
 	MCPConfig         mcp.Options
+	KeygenConfig      license.Config
 )
 
 type MetricsAuthConfig struct {
@@ -158,6 +171,7 @@ type Config struct {
 	AuditConfig
 	RateLimiterConfig
 	MCPConfig
+	KeygenConfig
 	services.Config
 }
 
@@ -277,6 +291,9 @@ type Services struct {
 	// Published artifact blob storage
 	ArtifactBlobStore  blob.BlobStore
 	ArtifactBlobBucket string
+
+	// License provider
+	LicenseProvider *license.KeygenProvider
 }
 
 const (
@@ -707,7 +724,17 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		events,
 		config.EnableAutonomousToolUse,
 	)
-	providerDispatcher := dispatcher.New(invoker, storageClient, credOnlyGPTscriptClient, gatewayClient, postgresDSN)
+	licenseMachineID, err := ensureLicenseMachineID(ctx, gatewayClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ensure license machine ID: %w", err)
+	}
+
+	keygenProvider, err := license.NewProvider(ctx, licenseMachineID, license.Config(config.KeygenConfig))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create keygen provider: %w", err)
+	}
+
+	providerDispatcher := dispatcher.New(invoker, storageClient, credOnlyGPTscriptClient, gatewayClient, postgresDSN, keygenProvider)
 
 	r, err := nah.NewRouter("obot-controller", &nah.Options{
 		RESTConfig:     restConfig,
@@ -1099,6 +1126,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 			rateLimiter,
 			config.Hostname,
 			registryNoAuth,
+			keygenProvider,
 		),
 		PersistentTokenServer:          persistentTokenServer,
 		Invoker:                        invoker,
@@ -1177,6 +1205,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		MCPNetworkPolicyProviderChartPath:    config.MCPNetworkPolicyProviderChartPath,
 		MCPNetworkPolicyProviderValues:       config.MCPNetworkPolicyProviderValues,
 		ArtifactBlobBucket:                   config.ArtifactStorageBucket,
+		LicenseProvider:                      keygenProvider,
 	}
 
 	if (config.ArtifactStorageProvider == "") != (config.ArtifactStorageBucket == "") {

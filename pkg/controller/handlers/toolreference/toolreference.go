@@ -22,6 +22,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api/handlers/providers"
 	"github.com/obot-platform/obot/pkg/controller/creds"
 	"github.com/obot-platform/obot/pkg/gateway/server/dispatcher"
+	"github.com/obot-platform/obot/pkg/license"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/obot-platform/obot/pkg/tools"
@@ -94,13 +95,10 @@ type Handler struct {
 	registryURLs       []string
 	lastChecksLock     *sync.RWMutex
 	lastChecks         map[string]time.Time
+	licenseProvider    *license.KeygenProvider
 }
 
-func New(gptClient *gptscript.GPTScript,
-	dispatcher *dispatcher.Dispatcher,
-	registryURLs []string,
-	supportDocker bool,
-) *Handler {
+func New(gptClient *gptscript.GPTScript, dispatcher *dispatcher.Dispatcher, registryURLs []string, supportDocker bool, licenseProvider *license.KeygenProvider) *Handler {
 	return &Handler{
 		gptClient:          gptClient,
 		dispatcher:         dispatcher,
@@ -108,6 +106,7 @@ func New(gptClient *gptscript.GPTScript,
 		supportDockerTools: supportDocker,
 		lastChecks:         make(map[string]time.Time),
 		lastChecksLock:     new(sync.RWMutex),
+		licenseProvider:    licenseProvider,
 	}
 }
 
@@ -393,7 +392,7 @@ func (h *Handler) BackPopulateModels(req router.Request, _ router.Response) erro
 		return nil
 	}
 
-	mps, err := providers.ConvertModelProviderToolRef(*toolRef, nil)
+	mps, err := providers.ConvertModelProviderToolRef(*toolRef, nil, h.licenseProvider)
 	if err != nil {
 		return err
 	}
@@ -406,7 +405,7 @@ func (h *Handler) BackPopulateModels(req router.Request, _ router.Response) erro
 			}
 			return err
 		}
-		mps, err = providers.ConvertModelProviderToolRef(*toolRef, cred.Env)
+		mps, err = providers.ConvertModelProviderToolRef(*toolRef, cred.Env, h.licenseProvider)
 		if err != nil {
 			return err
 		}
@@ -527,7 +526,7 @@ func (h *Handler) CleanupModelProvider(req router.Request, _ router.Response) er
 		return nil
 	}
 
-	mps, err := providers.ConvertModelProviderToolRef(*toolRef, nil)
+	mps, err := providers.ConvertModelProviderToolRef(*toolRef, nil, h.licenseProvider)
 	if err != nil {
 		return err
 	}

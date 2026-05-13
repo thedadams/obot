@@ -28,10 +28,30 @@ func (c *Client) SetProperty(ctx context.Context, key, value string) (types.Prop
 				}
 				return tx.Create(&p).Error
 			}
-			return c.db.WithContext(ctx).Create(&p).Error
+			return err
 		}
 		p.Value = value
 		p.UpdatedAt = time.Now()
 		return tx.Save(&p).Error
+	})
+}
+
+func (c *Client) GetOrCreateProperty(ctx context.Context, key, value string) (types.Property, error) {
+	now := time.Now()
+	var p types.Property
+	return p, c.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("key = ?", key).First(&p).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				p = types.Property{
+					Key:       key,
+					Value:     value,
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+				return tx.Create(&p).Error
+			}
+			return err
+		}
+		return nil
 	})
 }

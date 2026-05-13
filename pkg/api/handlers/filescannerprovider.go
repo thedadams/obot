@@ -14,6 +14,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api"
 	"github.com/obot-platform/obot/pkg/gateway/server/dispatcher"
 	"github.com/obot-platform/obot/pkg/invoke"
+	"github.com/obot-platform/obot/pkg/license"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,12 +25,14 @@ import (
 type FileScannerProviderHandler struct {
 	dispatcher *dispatcher.Dispatcher
 	invoker    *invoke.Invoker
+	license    *license.KeygenProvider
 }
 
-func NewFileScannerProviderHandler(dispatcher *dispatcher.Dispatcher, invoker *invoke.Invoker) *FileScannerProviderHandler {
+func NewFileScannerProviderHandler(dispatcher *dispatcher.Dispatcher, invoker *invoke.Invoker, licenseProvider *license.KeygenProvider) *FileScannerProviderHandler {
 	return &FileScannerProviderHandler{
 		dispatcher: dispatcher,
 		invoker:    invoker,
+		license:    licenseProvider,
 	}
 }
 
@@ -46,7 +49,7 @@ func (f *FileScannerProviderHandler) ByID(req api.Context) error {
 		)
 	}
 
-	mps, err := providers.ConvertFileScannerProviderToolRef(ref, nil)
+	mps, err := providers.ConvertFileScannerProviderToolRef(ref, nil, f.license)
 	if err != nil {
 		return err
 	}
@@ -63,7 +66,7 @@ func (f *FileScannerProviderHandler) ByID(req api.Context) error {
 		}
 	}
 
-	fileScannerProvider, err := convertToolReferenceToFileScannerProvider(ref, credEnvVars)
+	fileScannerProvider, err := f.convertToolReferenceToFileScannerProvider(ref, credEnvVars)
 	if err != nil {
 		return err
 	}
@@ -106,7 +109,7 @@ func (f *FileScannerProviderHandler) List(req api.Context) error {
 		if !ok {
 			env = credMap[system.GenericFileScannerProviderCredentialContext+ref.Name]
 		}
-		fileScannerProvider, err := convertToolReferenceToFileScannerProvider(ref, env)
+		fileScannerProvider, err := f.convertToolReferenceToFileScannerProvider(ref, env)
 		if err != nil {
 			log.Errorf("failed to convert file scanner provider %q: %v", ref.Name, err)
 			continue
@@ -296,13 +299,13 @@ func (f *FileScannerProviderHandler) Reveal(req api.Context) error {
 	return types.NewErrNotFound("no credential found for %q", ref.Name)
 }
 
-func convertToolReferenceToFileScannerProvider(ref v1.ToolReference, credEnvVars map[string]string) (types.FileScannerProvider, error) {
+func (f *FileScannerProviderHandler) convertToolReferenceToFileScannerProvider(ref v1.ToolReference, credEnvVars map[string]string) (types.FileScannerProvider, error) {
 	name := ref.Name
 	if ref.Status.Tool != nil {
 		name = ref.Status.Tool.Name
 	}
 
-	mps, err := providers.ConvertFileScannerProviderToolRef(ref, credEnvVars)
+	mps, err := providers.ConvertFileScannerProviderToolRef(ref, credEnvVars, f.license)
 	if err != nil {
 		return types.FileScannerProvider{}, err
 	}

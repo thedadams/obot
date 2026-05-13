@@ -263,6 +263,7 @@ export interface BaseProvider {
 	name: string;
 	configured: boolean;
 	created: string;
+	missingEntitlements?: string[];
 	missingConfigurationParameters?: string[];
 	optionalConfigurationParameters?: ProviderParameter[];
 	requiredConfigurationParameters?: ProviderParameter[];

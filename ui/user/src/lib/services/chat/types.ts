@@ -163,6 +163,7 @@ export interface Version {
 	obot?: string;
 	authEnabled?: boolean;
 	enterprise?: boolean;
+	licenseEntitlements?: string[];
 	upgradeAvailable?: boolean;
 	engine?: 'docker' | 'kubernetes' | 'local';
 	mcpNetworkPolicyEnabled?: boolean;
@@ -743,6 +744,7 @@ export interface ModelProvider {
 		sensitive?: boolean;
 		hidden?: boolean;
 	}[];
+	missingEntitlements?: string[];
 	missingConfigurationParameters?: string[];
 	created: string;
 	optionalConfigurationParameters?: {

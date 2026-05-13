@@ -12,6 +12,7 @@ import (
 	"github.com/obot-platform/obot/pkg/api"
 	"github.com/obot-platform/obot/pkg/api/handlers/providers"
 	"github.com/obot-platform/obot/pkg/gateway/server/dispatcher"
+	"github.com/obot-platform/obot/pkg/license"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/tidwall/gjson"
@@ -25,12 +26,14 @@ import (
 type AuthProviderHandler struct {
 	dispatcher  *dispatcher.Dispatcher
 	postgresDSN string
+	license     *license.KeygenProvider
 }
 
-func NewAuthProviderHandler(dispatcher *dispatcher.Dispatcher, postgresDSN string) *AuthProviderHandler {
+func NewAuthProviderHandler(dispatcher *dispatcher.Dispatcher, postgresDSN string, licenseProvider *license.KeygenProvider) *AuthProviderHandler {
 	return &AuthProviderHandler{
 		dispatcher:  dispatcher,
 		postgresDSN: postgresDSN,
+		license:     licenseProvider,
 	}
 }
 
@@ -49,7 +52,7 @@ func (ap *AuthProviderHandler) ByID(req api.Context) error {
 
 	var credEnvVars map[string]string
 	if ref.Status.Tool != nil {
-		aps, err := providers.ConvertModelProviderToolRef(ref, nil)
+		aps, err := providers.ConvertModelProviderToolRef(ref, nil, ap.license)
 		if err != nil {
 			return err
 		}
@@ -63,7 +66,7 @@ func (ap *AuthProviderHandler) ByID(req api.Context) error {
 		}
 	}
 
-	authProvider, err := convertToolReferenceToAuthProvider(ref, credEnvVars)
+	authProvider, err := ap.convertToolReferenceToAuthProvider(ref, credEnvVars)
 	if err != nil {
 		return err
 	}
@@ -115,7 +118,7 @@ func (ap *AuthProviderHandler) listAuthProviders(req api.Context) ([]types.AuthP
 		if !ok {
 			env = credMap[system.GenericAuthProviderCredentialContext+ref.Name]
 		}
-		authProvider, err := convertToolReferenceToAuthProvider(ref, env)
+		authProvider, err := ap.convertToolReferenceToAuthProvider(ref, env)
 		if err != nil {
 			log.Warnf("failed to convert auth provider %q: %v", ref.Name, err)
 			continue
@@ -133,6 +136,10 @@ func (ap *AuthProviderHandler) Configure(req api.Context) error {
 
 	if ref.Spec.Type != types.ToolReferenceTypeAuthProvider {
 		return types.NewErrBadRequest("%q is not an auth provider", ref.Name)
+	}
+
+	if err := ap.license.RequireForProvider(ref); err != nil {
+		return err
 	}
 
 	configuredProvider, err := ap.dispatcher.GetConfiguredAuthProvider(req.Context())
@@ -298,12 +305,12 @@ func authProviderNameFromToolRef(ref v1.ToolReference) string {
 	return name
 }
 
-func convertToolReferenceToAuthProvider(ref v1.ToolReference, credEnvVars map[string]string) (types.AuthProvider, error) {
-	aps, err := providers.ConvertAuthProviderToolRef(ref, credEnvVars)
+func (ap *AuthProviderHandler) convertToolReferenceToAuthProvider(ref v1.ToolReference, credEnvVars map[string]string) (types.AuthProvider, error) {
+	aps, err := providers.ConvertAuthProviderToolRef(ref, credEnvVars, ap.license)
 	if err != nil {
 		return types.AuthProvider{}, err
 	}
-	ap := types.AuthProvider{
+	authProvider := types.AuthProvider{
 		Metadata: MetadataFrom(&ref),
 		AuthProviderManifest: types.AuthProviderManifest{
 			Name:          authProviderNameFromToolRef(ref),
@@ -313,9 +320,9 @@ func convertToolReferenceToAuthProvider(ref v1.ToolReference, credEnvVars map[st
 		AuthProviderStatus: *aps,
 	}
 
-	ap.Type = "authprovider"
+	authProvider.Type = "authprovider"
 
-	return ap, nil
+	return authProvider, nil
 }
 
 func generateCookieSecret() (string, error) {

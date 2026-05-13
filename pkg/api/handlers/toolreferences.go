@@ -10,19 +10,22 @@ import (
 	"github.com/obot-platform/nah/pkg/name"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/api"
+	"github.com/obot-platform/obot/pkg/license"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/tools"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type ToolReferenceHandler struct{}
-
-func NewToolReferenceHandler() *ToolReferenceHandler {
-	return &ToolReferenceHandler{}
+type ToolReferenceHandler struct {
+	licenseProvider *license.KeygenProvider
 }
 
-func convertToolReference(toolRef v1.ToolReference) types.ToolReference {
+func NewToolReferenceHandler(licenseProvider *license.KeygenProvider) *ToolReferenceHandler {
+	return &ToolReferenceHandler{licenseProvider: licenseProvider}
+}
+
+func convertToolReference(toolRef v1.ToolReference, licenseProvider *license.KeygenProvider) types.ToolReference {
 	tf := types.ToolReference{
 		Metadata: MetadataFrom(&toolRef),
 		ToolReferenceManifest: types.ToolReferenceManifest{
@@ -46,8 +49,21 @@ func convertToolReference(toolRef v1.ToolReference) types.ToolReference {
 		tf.Params = toolRef.Status.Tool.Params
 		tf.Name = toolRef.Status.Tool.Name
 		tf.Description = toolRef.Status.Tool.Description
-		tf.Metadata.Metadata = toolRef.Status.Tool.Metadata
 		tf.Credentials = toolRef.Status.Tool.Credentials
+		tf.Metadata.Metadata = toolRef.Status.Tool.Metadata
+
+		providerMeta, err := license.MetaForProvider(toolRef)
+		if err == nil {
+			for _, entitlement := range providerMeta.RequiredEntitlements {
+				entitlement = strings.TrimSpace(entitlement)
+				if entitlement == "" {
+					continue
+				}
+				if !licenseProvider.HasEntitlement(entitlement) {
+					tf.Active = false
+				}
+			}
+		}
 	}
 
 	return tf
@@ -63,7 +79,7 @@ func (a *ToolReferenceHandler) ByID(req api.Context) error {
 		return err
 	}
 
-	return req.Write(convertToolReference(toolRef))
+	return req.Write(convertToolReference(toolRef, a.licenseProvider))
 }
 
 var validCharsRegexp = regexp.MustCompile(`[^a-zA-Z0-9-]+`)
@@ -137,7 +153,7 @@ func (a *ToolReferenceHandler) Create(req api.Context) (err error) {
 		}
 	}
 
-	return req.Write(convertToolReference(*toolRefs[0]))
+	return req.Write(convertToolReference(*toolRefs[0], a.licenseProvider))
 }
 
 func (a *ToolReferenceHandler) Delete(req api.Context) error {
@@ -201,7 +217,7 @@ func (a *ToolReferenceHandler) Update(req api.Context) error {
 		return err
 	}
 
-	return req.Write(convertToolReference(existing))
+	return req.Write(convertToolReference(existing, a.licenseProvider))
 }
 
 func (a *ToolReferenceHandler) List(req api.Context) error {
@@ -217,7 +233,7 @@ func (a *ToolReferenceHandler) List(req api.Context) error {
 	var resp types.ToolReferenceList
 	for _, toolRef := range toolRefList.Items {
 		if toolType == "" || toolRef.Spec.Type == toolType {
-			resp.Items = append(resp.Items, convertToolReference(toolRef))
+			resp.Items = append(resp.Items, convertToolReference(toolRef, a.licenseProvider))
 		}
 	}
 
@@ -240,5 +256,5 @@ func (a *ToolReferenceHandler) ForceRefresh(req api.Context) error {
 		return err
 	}
 
-	return req.Write(convertToolReference(existing))
+	return req.Write(convertToolReference(existing, a.licenseProvider))
 }

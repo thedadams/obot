@@ -5,13 +5,15 @@ import (
 	"fmt"
 
 	"github.com/obot-platform/obot/apiclient/types"
+	"github.com/obot-platform/obot/pkg/license"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 )
 
-func ConvertProviderToolRef(toolRef v1.ToolReference, cred map[string]string) (*types.CommonProviderStatus, error) {
+func ConvertProviderToolRef(toolRef v1.ToolReference, cred map[string]string, licenseProvider *license.KeygenProvider) (*types.CommonProviderStatus, error) {
 	var (
-		providerMeta   ProviderMeta
-		missingEnvVars []string
+		providerMeta        ProviderMeta
+		missingEnvVars      []string
+		missingEntitlements []string
 	)
 	if toolRef.Status.Tool != nil {
 		if toolRef.Status.Tool.Metadata["providerMeta"] != "" {
@@ -25,6 +27,12 @@ func ConvertProviderToolRef(toolRef v1.ToolReference, cred map[string]string) (*
 				missingEnvVars = append(missingEnvVars, envVar.Name)
 			}
 		}
+
+		for _, entitlement := range providerMeta.RequiredEntitlements {
+			if !licenseProvider.HasEntitlement(entitlement) {
+				missingEntitlements = append(missingEntitlements, entitlement)
+			}
+		}
 	}
 
 	return &types.CommonProviderStatus{
@@ -33,6 +41,7 @@ func ConvertProviderToolRef(toolRef v1.ToolReference, cred map[string]string) (*
 		RequiredConfigurationParameters: providerMeta.EnvVars,
 		OptionalConfigurationParameters: providerMeta.OptionalEnvVars,
 		MissingConfigurationParameters:  missingEnvVars,
+		MissingEntitlements:             missingEntitlements,
 		Error:                           toolRef.Status.Error,
 	}, nil
 }

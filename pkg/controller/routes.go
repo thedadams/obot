@@ -58,6 +58,7 @@ func (c *Controller) setupRoutes() {
 		c.services.ProviderDispatcher,
 		c.services.ToolRegistryURLs,
 		c.services.SupportDocker,
+		c.services.LicenseProvider,
 	)
 	workspace := workspace.New(c.services.GPTClient, c.services.WorkspaceProviderType)
 	knowledgeset := knowledgeset.New(c.services.Invoker, c.services.GPTClient)
