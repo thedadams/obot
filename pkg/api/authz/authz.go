@@ -78,6 +78,8 @@ var (
 		"/api/devices/clients/",
 		"/api/mdm/configurations",
 		"/api/mdm/configurations/",
+		"GET /api/enforcement-decisions",
+		"GET /api/enforcement-decisions/",
 		"/api/mdm/asset-source",
 		"/api/mdm/asset-source/",
 		"GET /api/mdm/assets",
@@ -188,6 +190,8 @@ var (
 			"GET /api/message-policy-violations",
 			"GET /api/message-policy-violations/",
 			"GET /api/message-policy-violation-stats",
+			"GET /api/enforcement-decisions",
+			"GET /api/enforcement-decisions/",
 			"GET /api/devices/scan-stats",
 			"GET /api/devices/mcp-servers/",
 			"GET /api/devices/skills",
@@ -334,6 +338,9 @@ var (
 
 			// Credentials that can submit scans can also submit local agent tool call audit logs.
 			"POST /api/local-agent-audit-logs",
+
+			// Devices ask for a synchronous enforcement decision before running a tool call.
+			"POST /api/enforcement/decisions",
 		},
 
 		types.GroupDeviceEnroll: {
