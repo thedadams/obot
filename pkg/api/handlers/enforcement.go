@@ -105,21 +105,31 @@ func respondDecision(req api.Context, decision enforcement.Decision) error {
 
 // recordAndRespond stamps the normalized call onto the decision-log row, records
 // it (buffered/async), and returns the synchronous verdict to the device.
+//
+// The device-supplied strings are bounded here, on their way to storage only. The
+// verdict is decided from the values as they arrived (normalizedCallFromRequest):
+// truncating before evaluation would be a bypass, because a long URL cut mid-path
+// can land exactly on an allowlisted path prefix that the real URL only extended.
 func (h *EnforcementHandler) recordAndRespond(req api.Context, entry gtypes.EnforcementDecisionLog, in types.EnforcementDecisionRequest, decision enforcement.Decision) error {
 	entry.CreatedAt = time.Now().UTC()
-	entry.Agent = in.Agent
-	entry.Tool = in.Tool
-	entry.Kind = in.Kind
-	entry.ServerName = in.ServerName
+	entry.Agent = truncateRunes(in.Agent, maxIdentifierRunes)
+	entry.Tool = truncateRunes(in.Tool, maxIdentifierRunes)
+	entry.Kind = truncateRunes(in.Kind, maxIdentifierRunes)
+	entry.ServerName = truncateRunes(in.ServerName, maxIdentifierRunes)
 	entry.Decision = verdict(decision)
 	entry.Reason = decision.Reason
-	entry.ServerURL = sanitizeServerURL(in.Server.URL)
-	entry.ServerHostname = serverHostname(in.Server)
-	entry.ServerCommand = sanitizeServerCommand(in.Server.Command)
+	entry.ServerURL = truncateRunes(sanitizeServerURL(in.Server.URL), maxServerURLRunes)
+	entry.ServerHostname = truncateRunes(serverHostname(in.Server), maxIdentifierRunes)
+	entry.ServerCommand = truncateRunes(sanitizeServerCommand(in.Server.Command), maxServerURLRunes)
+	entry.ServerConnector = truncateRunes(in.Server.Connector, maxIdentifierRunes)
+	entry.Unresolved = in.Unresolved
+	if in.Unresolved {
+		entry.UnresolvedReason = sanitizeUnresolvedReason(in.UnresolvedReason)
+	}
 	if in.Server.Package != nil {
-		entry.ServerPackageSource = string(in.Server.Package.Source)
-		entry.ServerPackageName = in.Server.Package.Name
-		entry.ServerPackageVersion = in.Server.Package.Version
+		entry.ServerPackageSource = truncateRunes(string(in.Server.Package.Source), maxIdentifierRunes)
+		entry.ServerPackageName = truncateRunes(in.Server.Package.Name, maxIdentifierRunes)
+		entry.ServerPackageVersion = truncateRunes(in.Server.Package.Version, maxIdentifierRunes)
 	}
 
 	req.GatewayClient.LogEnforcementDecision(entry)
@@ -158,25 +168,70 @@ func (h *EnforcementHandler) ListDecisions(req api.Context) error {
 	})
 }
 
-// GetDecision handles GET /api/enforcement-decisions/{id} (admin-only).
-func (h *EnforcementHandler) GetDecision(req api.Context) error {
+// parseEnforcementDecisionID reads a decision id from the request path.
+func parseEnforcementDecisionID(req api.Context) (uint, error) {
 	id := req.PathValue("id")
 	if id == "" {
-		return types.NewErrBadRequest("missing enforcement decision id")
+		return 0, types.NewErrBadRequest("missing enforcement decision id")
 	}
 	parsed, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return types.NewErrBadRequest("invalid enforcement decision id: %v", err)
+		return 0, types.NewErrBadRequest("invalid enforcement decision id: %v", err)
+	}
+	return uint(parsed), nil
+}
+
+// GetDecision handles GET /api/enforcement-decisions/{id} (admin-only).
+func (h *EnforcementHandler) GetDecision(req api.Context) error {
+	id, err := parseEnforcementDecisionID(req)
+	if err != nil {
+		return err
 	}
 
-	decision, err := req.GatewayClient.GetEnforcementDecision(req.Context(), uint(parsed))
+	decision, err := req.GatewayClient.GetEnforcementDecision(req.Context(), id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return types.NewErrNotFound("enforcement decision %s not found", id)
+		return types.NewErrNotFound("enforcement decision %d not found", id)
 	} else if err != nil {
 		return err
 	}
 
 	return req.Write(presentEnforcementDecision(*decision))
+}
+
+// CheckDecisionAllowlist handles GET /api/enforcement-decisions/allowlist-check/{id}
+// (admin-only). It replays a recorded decision against its fleet's current
+// allowlist. It records nothing in the decision log.
+func (h *EnforcementHandler) CheckDecisionAllowlist(req api.Context) error {
+	id, err := parseEnforcementDecisionID(req)
+	if err != nil {
+		return err
+	}
+
+	log, err := req.GatewayClient.GetEnforcementDecision(req.Context(), id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return types.NewErrNotFound("enforcement decision %d not found", id)
+	} else if err != nil {
+		return err
+	}
+
+	policy, err := req.GatewayClient.GetMDMConfigurationEnforcement(req.Context(), log.MDMConfigurationID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return types.NewErrNotFound("MDM configuration %d not found", log.MDMConfigurationID)
+	} else if err != nil {
+		return err
+	}
+
+	decision := enforcement.Evaluate(
+		normalizedCallFromDecisionLog(*log, h.isObotHosted(log.ServerURL)),
+		policy.Allowlist,
+	)
+
+	return req.Write(types.EnforcementDecisionAllowlistCheck{
+		ID:                 strconv.FormatUint(uint64(log.ID), 10),
+		AllowlistDecision:  verdict(decision),
+		AllowlistReason:    decision.Reason,
+		EnforcementEnabled: policy.Enabled,
+	})
 }
 
 // enforcementDecisionFilters are the filter keys the decision-log UI may request
@@ -278,11 +333,14 @@ func presentEnforcementDecision(log gtypes.EnforcementDecisionLog) types.Enforce
 		ObotHosted:         log.ObotHosted,
 		Decision:           log.Decision,
 		Reason:             log.Reason,
+		Unresolved:         log.Unresolved,
+		UnresolvedReason:   log.UnresolvedReason,
 	}
 	server := types.EnforcementDecisionServer{
-		URL:      log.ServerURL,
-		Command:  log.ServerCommand,
-		Hostname: log.ServerHostname,
+		URL:       log.ServerURL,
+		Command:   log.ServerCommand,
+		Hostname:  log.ServerHostname,
+		Connector: log.ServerConnector,
 	}
 	if log.ServerPackageName != "" || log.ServerPackageSource != "" {
 		server.Package = &types.AllowlistServerPackage{
@@ -303,16 +361,50 @@ func normalizedCallFromRequest(in types.EnforcementDecisionRequest, obotHosted b
 		ServerName: in.ServerName,
 		ObotHosted: obotHosted,
 		Server: enforcement.ServerIdentity{
-			URL:      in.Server.URL,
-			Command:  in.Server.Command,
-			Hostname: in.Server.Hostname,
+			URL:     in.Server.URL,
+			Command: in.Server.Command,
+			// Hostname is left empty on purpose so the evaluator derives it from the
+			// URL. Honoring the device-reported value would let a report name a
+			// hostname its own URL contradicts, and a hostname allowlist entry would
+			// then match a call to somewhere else entirely. See serverHostname.
+			Connector: in.Server.Connector,
 		},
+		Unresolved: in.Unresolved,
+	}
+	if in.Unresolved {
+		call.UnresolvedReason = sanitizeUnresolvedReason(in.UnresolvedReason)
 	}
 	if in.Server.Package != nil {
 		call.Server.Package = &enforcement.PackageIdentity{
 			Source:  in.Server.Package.Source,
 			Name:    in.Server.Package.Name,
 			Version: in.Server.Package.Version,
+		}
+	}
+	return call
+}
+
+func normalizedCallFromDecisionLog(log gtypes.EnforcementDecisionLog, obotHosted bool) enforcement.NormalizedCall {
+	call := enforcement.NormalizedCall{
+		Agent:      log.Agent,
+		Tool:       log.Tool,
+		Kind:       log.Kind,
+		ServerName: log.ServerName,
+		ObotHosted: obotHosted,
+		Server: enforcement.ServerIdentity{
+			URL:       log.ServerURL,
+			Command:   log.ServerCommand,
+			Hostname:  log.ServerHostname,
+			Connector: log.ServerConnector,
+		},
+		Unresolved:       log.Unresolved,
+		UnresolvedReason: log.UnresolvedReason,
+	}
+	if log.ServerPackageName != "" || log.ServerPackageSource != "" {
+		call.Server.Package = &enforcement.PackageIdentity{
+			Source:  types.AllowlistServerPackageSource(log.ServerPackageSource),
+			Name:    log.ServerPackageName,
+			Version: log.ServerPackageVersion,
 		}
 	}
 	return call
@@ -376,12 +468,33 @@ func sanitizeServerCommand(raw string) string {
 	return fields[0]
 }
 
-// serverHostname returns the hostname the row should record: the explicit one if
-// supplied, otherwise the host derived from the URL.
-func serverHostname(server types.EnforcementDecisionServer) string {
-	if server.Hostname != "" {
-		return server.Hostname
+const (
+	maxUnresolvedReasonRunes = 512
+	maxIdentifierRunes       = 256
+	maxServerURLRunes        = 2048
+)
+
+func sanitizeUnresolvedReason(raw string) string {
+	return truncateRunes(strings.TrimSpace(raw), maxUnresolvedReasonRunes)
+}
+
+// truncateRunes cuts s to at most maximum runes, never splitting one. It walks
+// byte offsets and stops at the cut instead of materializing a []rune, so an
+// oversized device-supplied string costs no allocation beyond the kept prefix.
+func truncateRunes(s string, maximum int) string {
+	count := 0
+	for i := range s {
+		if count == maximum {
+			return s[:i]
+		}
+		count++
 	}
+	return s
+}
+
+// serverHostname returns the hostname the row should record, always derived from
+// the resolved URL.
+func serverHostname(server types.EnforcementDecisionServer) string {
 	if server.URL == "" {
 		return ""
 	}

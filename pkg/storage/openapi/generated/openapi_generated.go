@@ -103,6 +103,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.DeviceSkillStatResponse":                   schema_obot_platform_obot_apiclient_types_DeviceSkillStatResponse(ref),
 		"github.com/obot-platform/obot/apiclient/types.ECRImagePullSecretConfig":                  schema_obot_platform_obot_apiclient_types_ECRImagePullSecretConfig(ref),
 		"github.com/obot-platform/obot/apiclient/types.EnforcementAllowlist":                      schema_obot_platform_obot_apiclient_types_EnforcementAllowlist(ref),
+		"github.com/obot-platform/obot/apiclient/types.EnforcementDecisionAllowlistCheck":         schema_obot_platform_obot_apiclient_types_EnforcementDecisionAllowlistCheck(ref),
 		"github.com/obot-platform/obot/apiclient/types.EnforcementDecisionEvent":                  schema_obot_platform_obot_apiclient_types_EnforcementDecisionEvent(ref),
 		"github.com/obot-platform/obot/apiclient/types.EnforcementDecisionEventList":              schema_obot_platform_obot_apiclient_types_EnforcementDecisionEventList(ref),
 		"github.com/obot-platform/obot/apiclient/types.EnforcementDecisionEventResponse":          schema_obot_platform_obot_apiclient_types_EnforcementDecisionEventResponse(ref),
@@ -805,7 +806,7 @@ func schema_obot_platform_obot_apiclient_types_AllowlistServer(ref common.Refere
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AllowlistServer allows MCP tool calls to one server. Exactly one of URL, Package, or Hostname identifies the server.",
+				Description: "AllowlistServer allows MCP tool calls to one server. Exactly one of URL, Package, Hostname, or Connector identifies the server.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"url": {
@@ -823,6 +824,13 @@ func schema_obot_platform_obot_apiclient_types_AllowlistServer(ref common.Refere
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",
+						},
+					},
+					"connector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Connector allowlists a hosted account connector by display name, for agent-account connectors that expose no local URL or command. The device attests which connector a call targeted; this decides whether it is permitted. Matched case-insensitively.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"tools": {
@@ -5161,7 +5169,7 @@ func schema_obot_platform_obot_apiclient_types_EnforcementAllowlist(ref common.R
 					},
 					"allowAllBuiltinAgentMcpServers": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AllowAllBuiltinAgentMCP allows any call to a built-in agent MCP server (i.e. Codex computer-use)",
+							Description: "AllowAllBuiltinAgentMCP allows any call to a built-in agent MCP server (i.e. Claude Code's workspace or claude-in-chrome)",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -5183,6 +5191,47 @@ func schema_obot_platform_obot_apiclient_types_EnforcementAllowlist(ref common.R
 		},
 		Dependencies: []string{
 			"github.com/obot-platform/obot/apiclient/types.AllowlistServer"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_EnforcementDecisionAllowlistCheck(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "EnforcementDecisionAllowlistCheck is the result of replaying a recorded decision against its fleet's current allowlist: would this call be allowed if it were made now? The decision log is append-only evidence of what devices were told, so asking this question records nothing.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"id": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"allowlistDecision": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"allowlistReason": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"enforcementEnabled": {
+						SchemaProps: spec.SchemaProps{
+							Default: false,
+							Type:    []string{"boolean"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"id", "allowlistDecision", "enforcementEnabled"},
+			},
+		},
 	}
 }
 
@@ -5270,6 +5319,19 @@ func schema_obot_platform_obot_apiclient_types_EnforcementDecisionEvent(ref comm
 					"server": {
 						SchemaProps: spec.SchemaProps{
 							Ref: ref("github.com/obot-platform/obot/apiclient/types.EnforcementDecisionServer"),
+						},
+					},
+					"unresolved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Unresolved reports that the device could not establish what the call targeted, and UnresolvedReason is the specific cause it reported. Such a row is always a deny, so these exist to let the UI label it as \"could not be identified\" rather than \"not allowlisted\".",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"unresolvedReason": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
 						},
 					},
 				},
@@ -5393,6 +5455,19 @@ func schema_obot_platform_obot_apiclient_types_EnforcementDecisionRequest(ref co
 							Ref:     ref("github.com/obot-platform/obot/apiclient/types.EnforcementDecisionServer"),
 						},
 					},
+					"unresolved": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Unresolved is set by the device when it could not establish what the call targets (unsupported stdio runner, disallowed runner flag, MCP server absent from every config file). The device has already blocked the call; this exists so the decision log records why.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"unresolvedReason": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
 				},
 				Required: []string{"server"},
 			},
@@ -5456,6 +5531,13 @@ func schema_obot_platform_obot_apiclient_types_EnforcementDecisionServer(ref com
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",
+						},
+					},
+					"connector": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Connector is the display name of a hosted agent-account connector, for servers that expose no local URL and no local command. It is the only local evidence of what such a server is.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},
