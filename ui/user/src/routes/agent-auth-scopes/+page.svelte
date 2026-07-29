@@ -4,11 +4,11 @@
 	import Layout from '$lib/components/Layout.svelte';
 	import ApiKeyRevealDialog from '$lib/components/agent-auth-scope/ApiKeyRevealDialog.svelte';
 	import CreateAgentAuthScopeForm from '$lib/components/agent-auth-scope/CreateAgentAuthScopeForm.svelte';
-	import ServersLabel from '$lib/components/agent-auth-scope/ServersLabel.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
 	import { ApiKeysService } from '$lib/services';
+	import { AUTH_SCOPE_DESCRIPTION } from '$lib/services/api-keys/constants.js';
 	import { getAPIKeyCapabilityLabels, type APIKey } from '$lib/services/api-keys/types';
 	import { formatTimeAgo, formatTimeUntil } from '$lib/time';
 	import { goto, getTableUrlParamsSort, setSortUrlParams } from '$lib/url';
@@ -24,7 +24,7 @@
 	let loading = $state(false);
 	let showCreateNew = $derived(page.url.searchParams.has('new'));
 	let createdKeyValue = $state<string>();
-	let initSort = $derived(getTableUrlParamsSort({ property: 'createdAt', order: 'desc' }));
+	let initSort = $derived(getTableUrlParamsSort({ property: 'name', order: 'asc' }));
 
 	const tableData = $derived(
 		apiKeys.map((key) => ({
@@ -102,7 +102,7 @@
 								<p class="text-sm font-semibold">What are these for?</p>
 							</div>
 							<p class="text-left text-sm font-light">
-								{@render description()}
+								{AUTH_SCOPE_DESCRIPTION}
 								<button class="text-link inline" onclick={showCreateForm}
 									>Create your first auth scope</button
 								>
@@ -111,27 +111,17 @@
 					</div>
 				</div>
 			{:else}
-				<p class="text-muted text-sm">{@render description()}</p>
+				<p class="text-muted text-sm">{AUTH_SCOPE_DESCRIPTION}</p>
 
 				<Table
 					data={tableData}
-					fields={[
-						'name',
-						'description',
-						'capabilitiesDisplay',
-						'mcpServerIds',
-						'createdAt',
-						'lastUsedAt',
-						'expiresAt'
-					]}
+					fields={['name', 'capabilitiesDisplay', 'lastUsedAt', 'expiresAt']}
 					headers={[
 						{ title: 'Capabilities', property: 'capabilitiesDisplay' },
 						{ title: 'Last Used', property: 'lastUsedAt' },
-						{ title: 'Servers', property: 'mcpServerIds' },
-						{ title: 'Created', property: 'createdAt' },
 						{ title: 'Expires', property: 'expiresAt' }
 					]}
-					sortable={['createdAt', 'lastUsedAt', 'expiresAt']}
+					sortable={['lastUsedAt', 'expiresAt']}
 					{initSort}
 					onSort={setSortUrlParams}
 					onClickRow={(d, isCtrlClick) => {
@@ -148,14 +138,13 @@
 									{#each d.capabilitiesDisplay as capability (capability)}
 										<span class="badge badge-ghost badge-xs whitespace-nowrap">{capability}</span>
 									{/each}
+									{#if d.mcpServerIds.length}
+										<span class="badge badge-ghost badge-xs whitespace-nowrap">Servers</span>
+									{/if}
 								</div>
 							{:else}
 								<span class="text-muted">-</span>
 							{/if}
-						{:else if property === 'mcpServerIds'}
-							<ServersLabel mcpServerIds={d.mcpServerIds} />
-						{:else if property === 'createdAt'}
-							{d.createdAtDisplay}
 						{:else if property === 'lastUsedAt'}
 							{d.lastUsedAtDisplay}
 						{:else if property === 'expiresAt'}
@@ -195,12 +184,6 @@
 />
 
 <ApiKeyRevealDialog keyValue={createdKeyValue} onClose={() => (createdKeyValue = undefined)} />
-
-{#snippet description()}
-	<b>Agent Auth Scope</b> lets you create reusable authorization scopes that define which MCP servers,
-	skills, and LLMs an agent can access. After defining a scope, you can generate API keys that enforce
-	those permissions, ensuring agents operate only within the capabilities you've authorized.
-{/snippet}
 
 <svelte:head>
 	<title>Obot | Agent Auth Keys</title>

@@ -5,10 +5,10 @@
 	import Layout from '$lib/components/Layout.svelte';
 	import ApiKeyRevealDialog from '$lib/components/agent-auth-scope/ApiKeyRevealDialog.svelte';
 	import CreateAgentAuthScopeForm from '$lib/components/agent-auth-scope/CreateAgentAuthScopeForm.svelte';
-	import ServersLabel from '$lib/components/agent-auth-scope/ServersLabel.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
 	import { ApiKeysService, type OrgUser, type APIKey } from '$lib/services';
+	import { AUTH_SCOPE_DESCRIPTION } from '$lib/services/api-keys/constants.js';
 	import { getAPIKeyCapabilityLabels } from '$lib/services/api-keys/types';
 	import { profile } from '$lib/stores';
 	import { formatTimeAgo, formatTimeUntil } from '$lib/time';
@@ -27,7 +27,7 @@
 	let loading = $state(false);
 	let showCreateNew = $derived(page.url.searchParams.has('new'));
 	let createdKeyValue = $state<string>();
-	let initSort = $derived(getTableUrlParamsSort({ property: 'createdAt', order: 'desc' }));
+	let initSort = $derived(getTableUrlParamsSort({ property: 'userDisplay', order: 'asc' }));
 
 	let usersMap = $derived(new Map(users.map((u) => [u.id, u])));
 
@@ -96,6 +96,9 @@
 		</div>
 	{:else}
 		<div class="flex flex-col gap-4">
+			<p class="text-sm">
+				{AUTH_SCOPE_DESCRIPTION}
+			</p>
 			{#if allApiKeys.length === 0}
 				<div class="mt-26 flex w-md flex-col items-center gap-4 self-center text-center">
 					<KeyRound class="text-muted-content size-24 opacity-50" />
@@ -106,29 +109,17 @@
 					</p>
 				</div>
 			{:else}
-				<p class="text-muted text-sm">View and manage all Agent Auth Scopes across all users.</p>
 				<Table
 					data={allTableData}
-					fields={[
-						'userDisplay',
-						'name',
-						'description',
-						'capabilitiesDisplay',
-						'mcpServerIds',
-						'createdAt',
-						'lastUsedAt',
-						'expiresAt'
-					]}
+					fields={['userDisplay', 'name', 'capabilitiesDisplay', 'lastUsedAt', 'expiresAt']}
 					headers={[
 						{ title: 'Created By', property: 'userDisplay' },
 						{ title: 'Capabilities', property: 'capabilitiesDisplay' },
-						{ title: 'Servers', property: 'mcpServerIds' },
-						{ title: 'Created', property: 'createdAt' },
 						{ title: 'Last Used', property: 'lastUsedAt' },
 						{ title: 'Expires', property: 'expiresAt' }
 					]}
 					filterable={['userDisplay', 'name']}
-					sortable={['userDisplay', 'name', 'createdAt', 'lastUsedAt', 'expiresAt']}
+					sortable={['userDisplay', 'name', 'lastUsedAt', 'expiresAt']}
 					{initSort}
 					onSort={setSortUrlParams}
 					onClickRow={(d, isCtrlClick) => {
@@ -142,22 +133,19 @@
 					}}
 				>
 					{#snippet onRenderColumn(property, d)}
-						{#if property === 'description'}
-							<span class="text-muted">{d.description || '-'}</span>
-						{:else if property === 'capabilitiesDisplay'}
+						{#if property === 'capabilitiesDisplay'}
 							{#if d.capabilitiesDisplay.length}
 								<div class="flex max-w-48 flex-wrap gap-1 py-1">
 									{#each d.capabilitiesDisplay as capability (capability)}
 										<span class="badge badge-ghost badge-xs whitespace-nowrap">{capability}</span>
 									{/each}
+									{#if d.mcpServerIds.length}
+										<span class="badge badge-ghost badge-xs whitespace-nowrap">Servers</span>
+									{/if}
 								</div>
 							{:else}
 								<span class="text-muted">-</span>
 							{/if}
-						{:else if property === 'mcpServerIds'}
-							<ServersLabel mcpServerIds={d.mcpServerIds} />
-						{:else if property === 'createdAt'}
-							{d.createdAtDisplay}
 						{:else if property === 'lastUsedAt'}
 							{d.lastUsedAtDisplay}
 						{:else if property === 'expiresAt'}
