@@ -1,27 +1,24 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import Confirm from '$lib/components/Confirm.svelte';
-	import DotDotDot from '$lib/components/DotDotDot.svelte';
 	import Layout from '$lib/components/Layout.svelte';
-	import ServersLabel from '$lib/components/api-keys/ServersLabel.svelte';
+	import ApiKeyRevealDialog from '$lib/components/agent-auth-scope/ApiKeyRevealDialog.svelte';
+	import CreateAgentAuthScopeForm from '$lib/components/agent-auth-scope/CreateAgentAuthScopeForm.svelte';
+	import ServersLabel from '$lib/components/agent-auth-scope/ServersLabel.svelte';
+	import IconButton from '$lib/components/primitives/IconButton.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
-	import { ApiKeysService, type OrgUser, type APIKey } from '$lib/services';
-	import { getAPIKeyCapabilityLabels } from '$lib/services/api-keys/types';
-	import { profile } from '$lib/stores';
+	import { ApiKeysService } from '$lib/services';
+	import { getAPIKeyCapabilityLabels, type APIKey } from '$lib/services/api-keys/types';
 	import { formatTimeAgo, formatTimeUntil } from '$lib/time';
 	import { goto, getTableUrlParamsSort, setSortUrlParams } from '$lib/url';
-	import { getUserDisplayName } from '$lib/utils';
 	import { openUrl } from '$lib/utils';
-	import ApiKeyRevealDialog from '../../keys/ApiKeyRevealDialog.svelte';
-	import CreateApiKeyForm from '../../keys/CreateApiKeyForm.svelte';
-	import { KeyRound, Plus, Trash2 } from '@lucide/svelte';
+	import { Info, KeyRound, Plus, Trash2 } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { fly } from 'svelte/transition';
 
 	let { data } = $props();
-	let allApiKeys = $state<APIKey[]>(untrack(() => data.allApiKeys));
-	let users = $state<OrgUser[]>(untrack(() => data.users));
+	let apiKeys = $state<APIKey[]>(untrack(() => data.apiKeys));
 
 	let deletingKey = $state<APIKey>();
 	let loading = $state(false);
@@ -29,13 +26,10 @@
 	let createdKeyValue = $state<string>();
 	let initSort = $derived(getTableUrlParamsSort({ property: 'createdAt', order: 'desc' }));
 
-	let usersMap = $derived(new Map(users.map((u) => [u.id, u])));
-
-	const allTableData = $derived(
-		allApiKeys.map((key) => ({
+	const tableData = $derived(
+		apiKeys.map((key) => ({
 			...key,
 			prefix: `ok1-${key.userId}-${key.id}-*****`,
-			userDisplay: getUserDisplayName(usersMap, String(key.userId)),
 			capabilitiesDisplay: getAPIKeyCapabilityLabels(key),
 			createdAtDisplay: formatTimeAgo(key.createdAt).relativeTime,
 			lastUsedAtDisplay: key.lastUsedAt ? formatTimeAgo(key.lastUsedAt).relativeTime : 'Never',
@@ -44,13 +38,13 @@
 		}))
 	);
 
-	async function handleDeleteAnyKey() {
+	async function handleDelete() {
 		const keyToDelete = deletingKey;
 		if (!keyToDelete) return;
 		loading = true;
 		try {
-			await ApiKeysService.deleteAnyApiKey(keyToDelete.id.toString());
-			allApiKeys = allApiKeys.filter((k) => k.id !== keyToDelete.id);
+			await ApiKeysService.deleteApiKey(keyToDelete.id.toString());
+			apiKeys = apiKeys.filter((k) => k.id !== keyToDelete.id);
 		} finally {
 			loading = false;
 			deletingKey = undefined;
@@ -58,7 +52,7 @@
 	}
 
 	async function handleCreate(newKey: APIKey & { key: string }) {
-		allApiKeys = [newKey, ...allApiKeys];
+		apiKeys = [newKey, ...apiKeys];
 		createdKeyValue = newKey.key;
 		hideCreateForm();
 	}
@@ -75,38 +69,54 @@
 		goto(url, { replaceState: true });
 	}
 
-	let isAdminReadonly = $derived(profile.current.isAdminReadonly?.());
 	const duration = PAGE_TRANSITION_DURATION;
 </script>
 
-<Layout title={showCreateNew ? 'Create API Key' : 'API Keys'} showBackButton={showCreateNew}>
+<Layout
+	title={showCreateNew ? 'Create Agent Auth Scope' : 'Agent Auth Scopes'}
+	showBackButton={showCreateNew}
+>
 	{#if showCreateNew}
 		<div
 			class="h-full w-full"
 			in:fly={{ x: 100, delay: duration, duration }}
 			out:fly={{ x: -100, duration }}
 		>
-			<CreateApiKeyForm onCreate={handleCreate} onCancel={() => goto('/admin/api-keys')} />
+			<CreateAgentAuthScopeForm onCreate={handleCreate} onCancel={hideCreateForm} />
 		</div>
 	{:else}
 		<div class="flex flex-col gap-4">
-			{#if allApiKeys.length === 0}
-				<div class="mt-26 flex w-md flex-col items-center gap-4 self-center text-center">
-					<KeyRound class="text-muted-content size-24 opacity-50" />
-					<h4 class="text-muted-content text-lg font-semibold">No API keys</h4>
+			{#if apiKeys.length === 0}
+				<div class="mt-26 flex w-lg flex-col items-center gap-4 self-center text-center">
+					<KeyRound class="text-base-content/80 size-24 opacity-50" />
+					<h4 class="text-muted-content text-lg font-semibold">No Agent Auth Scopes</h4>
 					<p class="text-muted-content text-sm font-light">
-						Looks like there aren't any API keys in the system yet. <br />
-						Click the "Create API Key" button above to get started.
+						Looks like you don't have any agent auth scopes yet! <br />
+						Click the "Create Agent Auth Scope" button above to get started.
 					</p>
+
+					<div class="notification-info mt-8">
+						<div class="flex flex-col gap-2">
+							<div class="flex items-center gap-2">
+								<Info class="size-4 shrink-0" />
+								<p class="text-sm font-semibold">What are these for?</p>
+							</div>
+							<p class="text-left text-sm font-light">
+								{@render description()}
+								<button class="text-link inline" onclick={showCreateForm}
+									>Create your first auth scope</button
+								>
+							</p>
+						</div>
+					</div>
 				</div>
 			{:else}
-				<p class="text-muted text-sm">View and manage all API keys across all users.</p>
+				<p class="text-muted text-sm">{@render description()}</p>
+
 				<Table
-					data={allTableData}
+					data={tableData}
 					fields={[
-						'userDisplay',
 						'name',
-						'prefix',
 						'description',
 						'capabilitiesDisplay',
 						'mcpServerIds',
@@ -115,22 +125,17 @@
 						'expiresAt'
 					]}
 					headers={[
-						{ title: 'User', property: 'userDisplay' },
-						{ title: 'Name', property: 'name' },
-						{ title: 'Key', property: 'prefix' },
-						{ title: 'Description', property: 'description' },
 						{ title: 'Capabilities', property: 'capabilitiesDisplay' },
+						{ title: 'Last Used', property: 'lastUsedAt' },
 						{ title: 'Servers', property: 'mcpServerIds' },
 						{ title: 'Created', property: 'createdAt' },
-						{ title: 'Last Used', property: 'lastUsedAt' },
 						{ title: 'Expires', property: 'expiresAt' }
 					]}
-					filterable={['userDisplay', 'name']}
-					sortable={['userDisplay', 'name', 'createdAt', 'lastUsedAt', 'expiresAt']}
+					sortable={['createdAt', 'lastUsedAt', 'expiresAt']}
 					{initSort}
 					onSort={setSortUrlParams}
 					onClickRow={(d, isCtrlClick) => {
-						const url = `/admin/api-keys/${d.id}`;
+						const url = `/agent-auth-scopes/${d.id}`;
 						openUrl(url, isCtrlClick);
 					}}
 				>
@@ -162,14 +167,9 @@
 						{/if}
 					{/snippet}
 					{#snippet actions(d)}
-						{#if !isAdminReadonly}
-							<DotDotDot>
-								<button class="menu-button text-error" onclick={() => (deletingKey = d)}>
-									<Trash2 class="size-4" />
-									Delete
-								</button>
-							</DotDotDot>
-						{/if}
+						<IconButton variant="danger" onclick={() => (deletingKey = d)}>
+							<Trash2 class="size-4" />
+						</IconButton>
 					{/snippet}
 				</Table>
 			{/if}
@@ -177,25 +177,31 @@
 	{/if}
 
 	{#snippet rightNavActions()}
-		{#if !showCreateNew && !profile.current.isAdminReadonly?.()}
+		{#if !showCreateNew}
 			<button class="btn btn-primary flex items-center gap-2 text-sm" onclick={showCreateForm}>
 				<Plus class="size-4" />
-				Create API Key
+				Create Auth Scope
 			</button>
 		{/if}
 	{/snippet}
 </Layout>
 
 <Confirm
-	msg={`Delete API key "${deletingKey?.name}"?`}
+	msg={`Delete "${deletingKey?.name}"?`}
 	show={Boolean(deletingKey)}
 	{loading}
-	onsuccess={handleDeleteAnyKey}
+	onsuccess={handleDelete}
 	oncancel={() => (deletingKey = undefined)}
 />
 
 <ApiKeyRevealDialog keyValue={createdKeyValue} onClose={() => (createdKeyValue = undefined)} />
 
+{#snippet description()}
+	<b>Agent Auth Scope</b> lets you create reusable authorization scopes that define which MCP servers,
+	skills, and LLMs an agent can access. After defining a scope, you can generate API keys that enforce
+	those permissions, ensuring agents operate only within the capabilities you've authorized.
+{/snippet}
+
 <svelte:head>
-	<title>Obot | API Keys</title>
+	<title>Obot | Agent Auth Keys</title>
 </svelte:head>
