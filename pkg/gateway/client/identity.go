@@ -399,7 +399,7 @@ func lockUserCreation(tx *gorm.DB) error {
 func newUserLimitError(maximum int) error {
 	return types2.NewErrHTTP(
 		http.StatusPaymentRequired,
-		fmt.Sprintf("user limit of %d reached; delete an existing user or install a license that permits additional users", maximum),
+		fmt.Sprintf("Unable to provision your account. Please contact your administrator."),
 	)
 }
 
