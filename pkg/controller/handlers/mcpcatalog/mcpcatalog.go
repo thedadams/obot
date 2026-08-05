@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	kuser "k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 )
@@ -178,17 +179,21 @@ func (h *Handler) Sync(req router.Request, resp router.Response) error {
 
 	// I know we don't want to do apply anymore. But we were doing it before in a different place.
 	// Now we're doing it here. It's not important enough to change right now.
-	app := apply.New(req.Client).WithOwnerSubContext(fmt.Sprintf("catalog-%s", mcpCatalog.Name))
+	// Apply must not prune because its informer may still observe stale ownership metadata and
+	// delete a freshly converted entry
+	app := apply.New(req.Client).WithOwnerSubContext(fmt.Sprintf("catalog-%s", mcpCatalog.Name)).WithNoPrune()
 
-	// Don't run prune if there are sync errors
+	// Missing entries cannot be reconciled safely from a partial desired set.
 	if len(mcpCatalog.Status.SyncErrors) > 0 {
-		log.Infof("Applying MCP catalog entries without prune due to source errors: catalog=%s entries=%d sourceErrors=%d", mcpCatalog.Name, len(toAdd), len(mcpCatalog.Status.SyncErrors))
-		app = app.WithNoPrune()
-	} else {
-		log.Infof("Applying MCP catalog entries with prune enabled: catalog=%s entries=%d", mcpCatalog.Name, len(toAdd))
-		app = app.WithPruneTypes(&v1.MCPServerCatalogEntry{})
+		log.Infof("Applying MCP catalog entries without reconciling missing entries due to source errors: catalog=%s entries=%d sourceErrors=%d", mcpCatalog.Name, len(toAdd), len(mcpCatalog.Status.SyncErrors))
+		return app.Apply(req.Ctx, mcpCatalog, toAdd...)
 	}
 
+	if err := reconcileRemovedEntries(req.Ctx, req.Client, mcpCatalog, toAdd); err != nil {
+		return err
+	}
+
+	log.Infof("Applying MCP catalog entries without prune: catalog=%s entries=%d", mcpCatalog.Name, len(toAdd))
 	return app.Apply(req.Ctx, mcpCatalog, toAdd...)
 }
 
@@ -198,6 +203,110 @@ func addSyncError(syncErrors map[string]string, sourceURL, errMsg string) {
 	} else {
 		syncErrors[sourceURL] = errMsg
 	}
+}
+
+func reconcileRemovedEntries(ctx context.Context, c client.Client, catalog *v1.MCPCatalog, desired []client.Object) error {
+	desiredNames := make(map[string]struct{}, len(desired))
+	for _, obj := range desired {
+		if entry, ok := obj.(*v1.MCPServerCatalogEntry); ok {
+			desiredNames[entry.Name] = struct{}{}
+		}
+	}
+	configuredSources := make(map[string]struct{}, len(catalog.Spec.SourceURLs))
+	for _, sourceURL := range catalog.Spec.SourceURLs {
+		configuredSources[mcp.SourceIDForURL(sourceURL)] = struct{}{}
+	}
+
+	var entries v1.MCPServerCatalogEntryList
+	if err := c.List(ctx, &entries, client.InNamespace(catalog.Namespace), client.MatchingFields{"spec.mcpCatalogName": catalog.Name}); err != nil {
+		return fmt.Errorf("failed to list catalog entries: %w", err)
+	}
+
+	missingNames := make(map[string]struct{})
+	for i := range entries.Items {
+		entry := &entries.Items[i]
+		if _, ok := desiredNames[entry.Name]; ok {
+			continue
+		}
+		if entry.Spec.SourceURL == "" {
+			continue
+		}
+
+		if _, configured := configuredSources[mcp.SourceIDForURL(entry.Spec.SourceURL)]; !configured {
+			if err := c.Delete(ctx, entry); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to delete catalog entry %q from removed source: %w", entry.Name, err)
+			}
+			log.Infof("Deleted MCP catalog entry from removed source: catalog=%s entry=%s source=%s", catalog.Name, entry.Name, entry.Spec.SourceURL)
+			continue
+		}
+
+		missingNames[entry.Name] = struct{}{}
+	}
+
+	if len(missingNames) == 0 {
+		return nil
+	}
+
+	var servers v1.MCPServerList
+	if err := c.List(ctx, &servers, client.InNamespace(catalog.Namespace)); err != nil {
+		return fmt.Errorf("failed to list servers for removed catalog entries: %w", err)
+	}
+	referencedNames := make([]string, 0, len(missingNames))
+	for _, server := range servers.Items {
+		entryName := server.Spec.MCPServerCatalogEntryName
+		if _, missing := missingNames[entryName]; missing {
+			referencedNames = append(referencedNames, entryName)
+			delete(missingNames, entryName)
+		}
+	}
+
+	for entryName := range missingNames {
+		entry := &v1.MCPServerCatalogEntry{ObjectMeta: metav1.ObjectMeta{Name: entryName, Namespace: catalog.Namespace}}
+		if err := c.Delete(ctx, entry); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete unused catalog entry %q: %w", entryName, err)
+		}
+		log.Infof("Deleted unused removed MCP catalog entry: catalog=%s entry=%s", catalog.Name, entryName)
+	}
+
+	for _, entryName := range referencedNames {
+		if err := convertCatalogEntryToEditable(ctx, c, catalog, entryName); err != nil {
+			return fmt.Errorf("failed to convert catalog entry %q to editable: %w", entryName, err)
+		}
+		log.Infof("Converted removed MCP catalog entry with active servers to editable: catalog=%s entry=%s", catalog.Name, entryName)
+	}
+
+	return nil
+}
+
+func convertCatalogEntryToEditable(ctx context.Context, c client.Client, catalog *v1.MCPCatalog, entryName string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var entry v1.MCPServerCatalogEntry
+		if err := c.Get(ctx, client.ObjectKey{Namespace: catalog.Namespace, Name: entryName}, &entry); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+
+		entry.Spec.Editable = true
+		entry.Spec.SourceURL = ""
+		entry.Spec.Manifest.EntryKey = ""
+		for key := range entry.Annotations {
+			if strings.HasPrefix(key, apply.LabelPrefix) {
+				delete(entry.Annotations, key)
+			}
+		}
+		for key := range entry.Labels {
+			if strings.HasPrefix(key, apply.LabelPrefix) {
+				delete(entry.Labels, key)
+			}
+		}
+		entry.OwnerReferences = slices.DeleteFunc(entry.OwnerReferences, func(ref metav1.OwnerReference) bool {
+			return ref.APIVersion == v1.SchemeGroupVersion.String() && ref.Kind == "MCPCatalog" && ref.Name == catalog.Name
+		})
+
+		return c.Update(ctx, &entry)
+	})
 }
 
 // resolveCompositeSourceRefs rewrites GitOps portable component refs to stored
