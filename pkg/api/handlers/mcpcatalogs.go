@@ -877,6 +877,7 @@ func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
 		configRequest.Config,
 		configRequest.URL,
 		h.serverURL,
+		ValidationOptionsWithResourceMaximums(h.sessionManager),
 	)
 	if err != nil {
 		return types.NewErrBadRequest("failed to create temporary server and config: %v", err)
@@ -1002,6 +1003,7 @@ func (h *MCPCatalogHandler) generateCompositeToolPreviews(req api.Context, entry
 			config.Config,
 			config.URL,
 			h.serverURL,
+			ValidationOptionsWithResourceMaximums(h.sessionManager),
 		)
 		if err != nil {
 			return err
@@ -1121,7 +1123,7 @@ func (h *MCPCatalogHandler) GenerateToolPreviewsOAuthURL(req api.Context) error 
 	if catalogName == "" {
 		catalogName = entry.Spec.PowerUserWorkspaceID
 	}
-	server, serverConfig, err := tempServerAndConfig(req.Context(), req.GatewayClient, req.Storage, req.LocalK8sClient, req.ObotNamespace, h.secretBindingAllowedLabel, entry.Namespace, catalogName, entry.Spec.Manifest, configRequest.Config, configRequest.URL, h.serverURL)
+	server, serverConfig, err := tempServerAndConfig(req.Context(), req.GatewayClient, req.Storage, req.LocalK8sClient, req.ObotNamespace, h.secretBindingAllowedLabel, entry.Namespace, catalogName, entry.Spec.Manifest, configRequest.Config, configRequest.URL, h.serverURL, ValidationOptionsWithResourceMaximums(h.sessionManager))
 	if err != nil {
 		return types.NewErrBadRequest("failed to create temporary server and config: %v", err)
 	}
@@ -1219,6 +1221,7 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		configRequest.Config,
 		configRequest.URL,
 		h.serverURL,
+		ValidationOptionsWithResourceMaximums(h.sessionManager),
 	)
 	if err != nil {
 		return types.NewErrBadRequest("failed to create temporary server and config: %v", err)
@@ -1344,6 +1347,7 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviewsOAuthURL(req api.Contex
 		configRequest.Config,
 		configRequest.URL,
 		h.serverURL,
+		ValidationOptionsWithResourceMaximums(h.sessionManager),
 	)
 	if err != nil {
 		return types.NewErrBadRequest("failed to create temporary server and config: %v", err)
@@ -1428,6 +1432,7 @@ func (h *MCPCatalogHandler) generateCompositeOAuthURLs(req api.Context, entry v1
 			config.Config,
 			config.URL,
 			h.serverURL,
+			ValidationOptionsWithResourceMaximums(h.sessionManager),
 		)
 		if err != nil {
 			// If we can't create server config, skip this component
@@ -1450,19 +1455,19 @@ func (h *MCPCatalogHandler) generateCompositeOAuthURLs(req api.Context, entry v1
 	return req.Write(oauthURLs)
 }
 
-func tempServerAndConfig(ctx context.Context, gatewayClient *gclient.Client, client client.Client, localK8sClient client.Client, obotNamespace, secretBindingAllowedLabel, namespace, catalogName string, entryManifest types.MCPServerCatalogEntryManifest, config map[string]string, url, baseURL string) (v1.MCPServer, mcp.ServerConfig, error) {
+func tempServerAndConfig(ctx context.Context, gatewayClient *gclient.Client, client client.Client, localK8sClient client.Client, obotNamespace, secretBindingAllowedLabel, namespace, catalogName string, entryManifest types.MCPServerCatalogEntryManifest, config map[string]string, url, baseURL string, validationOptions mcp.ValidationOptions) (v1.MCPServer, mcp.ServerConfig, error) {
 	// Convert catalog entry to server manifest
 	serverManifest, err := types.MapCatalogEntryToServer(entryManifest, url, false)
 	if err != nil {
 		return v1.MCPServer{}, mcp.ServerConfig{}, fmt.Errorf("failed to convert catalog entry to server config: %w", err)
 	}
 
-	// Merge any secretBinding-resolved values into the user-supplied
-	// config so URL-template substitution and ServerToServerConfig see
-	// them. The caller's config map is not mutated.
-	config, err = mcp.MergeBoundCreds(ctx, localK8sClient, obotNamespace, serverManifest.Env, serverManifest.RemoteConfig, config, secretBindingAllowedLabel)
+	config, err = prepareTempServerConfig(ctx, localK8sClient, obotNamespace, secretBindingAllowedLabel, &serverManifest, config, !entryManifest.ServerUserType.IsSingleUser(), validationOptions)
 	if err != nil {
-		return v1.MCPServer{}, mcp.ServerConfig{}, fmt.Errorf("failed to resolve secret bindings: %w", err)
+		return v1.MCPServer{}, mcp.ServerConfig{}, err
+	}
+	if err := tunnel.ValidateServerTunnelReferences(ctx, client, serverManifest); err != nil {
+		return v1.MCPServer{}, mcp.ServerConfig{}, types.NewErrBadRequest("validation failed: %v", err)
 	}
 
 	// Create temporary MCPServer object to use existing conversion logic
@@ -1525,6 +1530,20 @@ func tempServerAndConfig(ctx context.Context, gatewayClient *gclient.Client, cli
 	}
 
 	return tempMCPServer, serverConfig, nil
+}
+
+func prepareTempServerConfig(ctx context.Context, localK8sClient client.Client, obotNamespace, secretBindingAllowedLabel string, serverManifest *types.MCPServerManifest, config map[string]string, isMultiUser bool, validationOptions mcp.ValidationOptions) (map[string]string, error) {
+	// Render templates before resolving bindings so Secret values can only be
+	// used by runtime fields such as headers, never embedded in the URL.
+	if err := applyRemoteURLTemplate(ctx, serverManifest, config, isMultiUser, validationOptions); err != nil {
+		return nil, err
+	}
+
+	mergedConfig, err := mcp.MergeBoundCreds(ctx, localK8sClient, obotNamespace, serverManifest.Env, serverManifest.RemoteConfig, config, secretBindingAllowedLabel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve secret bindings: %w", err)
+	}
+	return mergedConfig, nil
 }
 
 // ListCategoriesForCatalog returns all unique categories from entries in a catalog
