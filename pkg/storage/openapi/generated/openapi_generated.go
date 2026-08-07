@@ -10182,6 +10182,12 @@ func schema_obot_platform_obot_apiclient_types_MCPServerCatalogEntry(ref common.
 							Format: "",
 						},
 					},
+					"detached": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
+						},
+					},
 					"catalogName": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
@@ -21452,6 +21458,13 @@ func schema_storage_apis_obotobotai_v1_MCPServerCatalogEntrySpec(ref common.Refe
 							Format: "",
 						},
 					},
+					"detached": {
+						SchemaProps: spec.SchemaProps{
+							Default: false,
+							Type:    []string{"boolean"},
+							Format:  "",
+						},
+					},
 					"sourceURL": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
@@ -21466,7 +21479,7 @@ func schema_storage_apis_obotobotai_v1_MCPServerCatalogEntrySpec(ref common.Refe
 						},
 					},
 				},
-				Required: []string{"manifest"},
+				Required: []string{"manifest", "detached"},
 			},
 		},
 		Dependencies: []string{
