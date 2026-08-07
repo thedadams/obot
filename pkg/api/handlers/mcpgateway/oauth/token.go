@@ -25,6 +25,7 @@ import (
 	"github.com/obot-platform/obot/pkg/storage/selectors"
 	"github.com/obot-platform/obot/pkg/system"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -266,26 +267,39 @@ func (h *handler) doRefreshToken(req api.Context, oauthClient v1.OAuthClient, re
 		return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidGrant, "refresh_token is invalid", ""))
 	}
 
-	if err := req.Delete(&oauthToken); err != nil {
-		if apierrors.IsNotFound(err) {
+	// Consume terminally invalid grants so they cannot become usable again if the referenced resource is recreated.
+	invalidGrant := func(description string) error {
+		if err := req.Storage.Delete(req.Context(), &oauthToken); apierrors.IsNotFound(err) {
 			return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidGrant, "refresh_token is invalid", ""))
+		} else if err != nil {
+			return fmt.Errorf("failed to invalidate oauth token: %w", err)
 		}
-		return fmt.Errorf("failed to refresh oauth token: %w", err)
+		return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidGrant, description, ""))
 	}
 
 	user, err := req.GatewayClient.UserInfoByID(req.Context(), oauthToken.Spec.UserID)
 	if err != nil {
-		return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidRequest, "invalid user", ""))
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return invalidGrant("invalid user")
+		}
+		return newOAuthError(ErrServerError, fmt.Sprintf("failed to retrieve user: %v", err), "")
 	}
 
 	allowed, err := authz.CheckMCPIDAccess(req.Context(), req.Storage, h.acrHelper, user, oauthToken.Spec.MCPID)
 	if apierrors.IsNotFound(err) {
-		return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidRequest, "invalid MCP server", ""))
+		return invalidGrant("invalid MCP server")
 	} else if err != nil {
 		return newOAuthError(ErrServerError, fmt.Sprintf("failed to check access to MCP server: %v", err), "")
 	}
 	if !allowed {
-		return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidRequest, "invalid MCP server", ""))
+		return invalidGrant("invalid MCP server")
+	}
+
+	if err := req.Storage.Delete(req.Context(), &oauthToken); err != nil {
+		if apierrors.IsNotFound(err) {
+			return types.NewErrBadRequest("%v", newOAuthError(ErrInvalidGrant, "refresh_token is invalid", ""))
+		}
+		return fmt.Errorf("failed to refresh oauth token: %w", err)
 	}
 
 	now := time.Now()
