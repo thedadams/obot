@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -180,6 +182,150 @@ func TestMCPSearchRegistryAuthErrors(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestMCPValidateCatalogYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "entry.yaml")
+	if err := os.WriteFile(path, []byte(`name: Test
+entryKey: test
+shortDescription: Test
+description: Test
+icon: icon
+runtime: remote
+remoteConfig:
+  fixedURL: https://does-not-resolve.invalid/mcp
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignored.yaml"), []byte("not: a catalog entry\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ignoreobotcatalogs"), []byte("ignored.yaml\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := executeMCPTestCommand(t, mcpTestRoot("http://unused.example"), "validate-catalog-yaml", dir, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "Catalog entries in 1 files are valid.") {
+		t.Fatalf("unexpected output: %s", stdout)
+	}
+}
+
+func TestMCPValidateCatalogYAMLRequiresEntryKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "entry.yaml")
+	if err := os.WriteFile(path, []byte(`
+- name: Missing
+  shortDescription: Missing
+  description: Missing
+  icon: icon
+  runtime: npx
+  npxConfig:
+    package: missing
+- name: Whitespace
+  entryKey: "  "
+  shortDescription: Whitespace
+  description: Whitespace
+  icon: icon
+  runtime: npx
+  npxConfig:
+    package: whitespace
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := executeMCPTestCommand(t, mcpTestRoot("http://unused.example"), "validate-catalog-yaml", "--require-entry-key", path)
+	if err == nil || !strings.Contains(err.Error(), "entry.yaml[0]: entryKey is required") || !strings.Contains(err.Error(), "entry.yaml[1]: entryKey is required") {
+		t.Fatalf("error = %v, want both missing entryKey errors", err)
+	}
+}
+
+func TestMCPValidateCatalogYAMLSupportsEntryArrays(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "entries.yaml")
+	if err := os.WriteFile(path, []byte(`
+- name: First
+  entryKey: first
+  shortDescription: First
+  description: First
+  icon: icon
+  runtime: npx
+  npxConfig:
+    package: first
+- name: Second
+  entryKey: second
+  shortDescription: Second
+  description: Second
+  icon: icon
+  runtime: uvx
+  uvxConfig:
+    package: second
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := executeMCPTestCommand(t, mcpTestRoot("http://unused.example"), "validate-catalog-yaml", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "Catalog entries in 1 files are valid.") {
+		t.Fatalf("unexpected output: %s", stdout)
+	}
+}
+
+func TestMCPValidateCatalogYAMLAggregatesErrors(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"duplicate-key.yaml": `name: First
+name: Second
+runtime: npx`,
+		"unknown-field.yaml": `name: Unknown
+entryKey: shared
+shortDescription: Unknown
+description: Unknown
+icon: icon
+runtime: npx
+npxConfig:
+  package: test
+unknownField: true`,
+		"invalid-runtime.yaml": `name: Invalid
+entryKey: shared
+shortDescription: Invalid
+description: Invalid
+icon: icon
+runtime: invalid`,
+		"duplicate-entry-key.yaml": `name: Duplicate
+entryKey: shared
+shortDescription: Duplicate
+description: Duplicate
+icon: icon
+runtime: npx
+npxConfig:
+  package: test`,
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := executeMCPTestCommand(t, mcpTestRoot("http://unused.example"), "validate-catalog-yaml", dir)
+	if err == nil {
+		t.Fatal("expected validation errors")
+	}
+	for _, expected := range []string{
+		"duplicate-key.yaml",
+		"key \"name\" already set",
+		"unknown-field.yaml",
+		"unknown field \"unknownField\"",
+		"unsupported runtime",
+		"duplicate source entry key \"shared\"",
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("error = %v, want %q", err, expected)
+		}
 	}
 }
 

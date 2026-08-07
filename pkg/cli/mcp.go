@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -13,6 +16,8 @@ import (
 	"github.com/obot-platform/obot/apiclient"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/cli/internal"
+	"github.com/obot-platform/obot/pkg/mcp"
+	"github.com/obot-platform/obot/pkg/mcpcatalog"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/spf13/cobra"
 )
@@ -28,10 +33,122 @@ func (m *MCP) Customize(c *cobra.Command) {
 	c.Short = "Manage MCP servers"
 	c.Args = cobra.NoArgs
 	c.AddCommand(cmd.Command(&MCPSearch{root: m.root}))
+	c.AddCommand(cmd.Command(&MCPValidateCatalogYAML{}))
 }
 
 func (m *MCP) Run(cmd *cobra.Command, _ []string) error {
 	return cmd.Help()
+}
+
+type MCPValidateCatalogYAML struct {
+	RequireEntryKey bool `usage:"Require every catalog entry to set entryKey"`
+}
+
+func (m *MCPValidateCatalogYAML) Customize(cmd *cobra.Command) {
+	cmd.Use = "validate-catalog-yaml <path>..."
+	cmd.Short = "Validate MCP catalog entry files"
+	cmd.Args = cobra.MinimumNArgs(1)
+}
+
+func (m *MCPValidateCatalogYAML) Run(cmd *cobra.Command, args []string) error {
+	files, err := validateMCPCatalogPaths(cmd.Context(), args, m.RequireEntryKey)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Catalog entries in %d files are valid.\n", files)
+	return nil
+}
+
+func validateMCPCatalogPaths(ctx context.Context, paths []string, requireEntryKey bool) (int, error) {
+	var validationErr error
+	seenFiles := make(map[string]struct{})
+	seenEntryKeys := make(map[string]string)
+
+	for _, input := range paths {
+		info, err := os.Stat(input)
+		if err != nil {
+			validationErr = errors.Join(validationErr, fmt.Errorf("%s: %w", input, err))
+			continue
+		}
+		if !info.IsDir() {
+			validationErr = errors.Join(validationErr, validateMCPCatalogFile(ctx, input, requireEntryKey, seenFiles, seenEntryKeys))
+			continue
+		}
+
+		files, _, err := mcpcatalog.WalkCatalogFiles(input)
+		if err != nil {
+			validationErr = errors.Join(validationErr, fmt.Errorf("%s: %w", input, err))
+			continue
+		}
+		for path, walkErr := range files {
+			if walkErr != nil {
+				validationErr = errors.Join(validationErr, fmt.Errorf("%s: %w", input, walkErr))
+				break
+			}
+			validationErr = errors.Join(validationErr, validateMCPCatalogFile(ctx, path, requireEntryKey, seenFiles, seenEntryKeys))
+		}
+	}
+	if len(seenFiles) == 0 {
+		validationErr = errors.Join(validationErr, fmt.Errorf("no catalog entry files found"))
+	}
+
+	return len(seenFiles), validationErr
+}
+
+func validateMCPCatalogFile(ctx context.Context, path string, requireEntryKey bool, seenFiles map[string]struct{}, seenEntryKeys map[string]string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = filepath.Clean(path)
+	}
+	if _, ok := seenFiles[absPath]; ok {
+		return nil
+	}
+	seenFiles[absPath] = struct{}{}
+
+	entries, isArray, err := mcpcatalog.DecodeCatalogFile[types.MCPServerCatalogEntryManifest](path, true)
+	if err != nil {
+		return fmt.Errorf("%s: invalid catalog entry: %w", path, err)
+	}
+
+	validationOptions := mcpcatalog.ValidationOptions{
+		GitManaged: true,
+		MCPBackend: mcp.RuntimeBackendKubernetes,
+		MCP: mcp.ValidationOptions{
+			RemoteMCPURLValidationConfig: mcp.RemoteMCPURLValidationConfig{
+				AllowLocalhostMCP: true,
+				AllowPrivateIPMCP: true,
+				AllowLinkLocalMCP: true,
+			},
+		},
+	}
+	var errs []error
+	for i := range entries {
+		entry := &entries[i]
+		label := path
+		if isArray {
+			label = fmt.Sprintf("%s[%d]", path, i)
+		}
+		mcpcatalog.NormalizeManifest(entry)
+
+		if requireEntryKey && strings.TrimSpace(entry.EntryKey) == "" {
+			errs = append(errs, fmt.Errorf("%s: entryKey is required", label))
+		}
+		if err := mcpcatalog.ValidateSourceFields(*entry); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", label, err))
+		}
+		if entry.EntryKey != "" {
+			if previous, ok := seenEntryKeys[entry.EntryKey]; ok {
+				errs = append(errs, fmt.Errorf("%s: duplicate source entry key %q also used by %s", label, entry.EntryKey, previous))
+			} else {
+				seenEntryKeys[entry.EntryKey] = label
+			}
+		}
+		if err := mcpcatalog.ValidateManifest(ctx, *entry, validationOptions); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", label, err))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 type MCPSearch struct {

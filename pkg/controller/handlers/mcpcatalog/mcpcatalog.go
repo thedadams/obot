@@ -1,14 +1,12 @@
 package mcpcatalog
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -25,33 +23,19 @@ import (
 	"github.com/obot-platform/obot/pkg/git"
 	"github.com/obot-platform/obot/pkg/gitcredential"
 	"github.com/obot-platform/obot/pkg/mcp"
+	catalogvalidation "github.com/obot-platform/obot/pkg/mcpcatalog"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	kuser "k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 )
 
-var (
-	log              = logger.Package()
-	invalidNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
-	multipleDashes   = regexp.MustCompile(`-{2,}`)
-)
-
-// sanitizeName lowercases the input, replaces any characters that are invalid
-// for RFC 1123 subdomain names with dashes, collapses consecutive dashes, and
-// trims leading/trailing dashes.
-func sanitizeName(n string) string {
-	n = strings.ToLower(n)
-	n = invalidNameChars.ReplaceAllString(n, "-")
-	n = multipleDashes.ReplaceAllString(n, "-")
-	return strings.Trim(n, "-")
-}
+var log = logger.Package()
 
 // CatalogCredentialToolName is the fixed tool name used for the single
 // credential that stores all source-URL tokens for a catalog. Each URL's
@@ -398,15 +382,11 @@ func (h *Handler) resolveCompositeSourceRefs(ctx context.Context, c client.Clien
 		}
 
 		if changed {
-			if err := mcp.ValidateCatalogEntryManifest(ctx, entry.Spec.Manifest, entry.IsGitManaged(), h.remoteURLValidationConfig); err != nil {
-				addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to validate resolved composite catalog entry %q: %v", entry.Name, err))
-				continue
-			}
-			if err := mcp.ValidateSecretBindingsCatalogEntry(entry.Spec.Manifest, entry.IsGitManaged(), false, h.mcpBackend); err != nil {
-				addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to validate resolved composite catalog entry %q: %v", entry.Name, err))
-				continue
-			}
-			if err := mcp.ValidateTemplateReferencesCatalogEntry(entry.Spec.Manifest); err != nil {
+			if err := catalogvalidation.ValidateManifest(ctx, entry.Spec.Manifest, catalogvalidation.ValidationOptions{
+				MCP:        h.remoteURLValidationConfig,
+				MCPBackend: h.mcpBackend,
+				GitManaged: entry.IsGitManaged(),
+			}); err != nil {
 				addSyncError(errsBySourceURL, entry.Spec.SourceURL, fmt.Sprintf("failed to validate resolved composite catalog entry %q: %v", entry.Name, err))
 				continue
 			}
@@ -553,7 +533,7 @@ func (h *Handler) readSystemMCPCatalog(ctx context.Context, catalogName, sourceU
 			delete(entry.Metadata, "categories")
 		}
 
-		cleanName := sanitizeName(entry.Name)
+		cleanName := catalogvalidation.SanitizeName(entry.Name)
 		if cleanName == "" {
 			err := fmt.Errorf("invalid system catalog entry name after sanitization: original=%q sanitized=%q", entry.Name, cleanName)
 			errs = append(errs, err)
@@ -561,7 +541,7 @@ func (h *Handler) readSystemMCPCatalog(ctx context.Context, catalogName, sourceU
 		}
 
 		mcpManifest := systemCatalogEntryManifestToMCP(entry)
-		sanitizeCatalogEntryManifest(&mcpManifest)
+		catalogvalidation.NormalizeManifest(&mcpManifest)
 		entry = mcpCatalogEntryManifestToSystem(mcpManifest, entry.SystemMCPServerType, entry.FilterConfig)
 		if err := mcp.ValidateSystemMCPServerCatalogEntryManifest(ctx, entry, mcp.ValidationOptions{}); err != nil {
 			errs = append(errs, fmt.Errorf("failed to validate system catalog entry %s: %w", entry.Name, err))
@@ -627,64 +607,9 @@ func systemCatalogEntryManifestToMCP(manifest types.SystemMCPServerCatalogEntryM
 }
 
 func (h *Handler) readMCPCatalog(ctx context.Context, catalogName, sourceURL, token string) ([]client.Object, error) {
-	var entries []types.MCPServerCatalogEntryManifest
-
-	if strings.HasPrefix(sourceURL, "http://") || strings.HasPrefix(sourceURL, "https://") {
-		if git.IsGitRepoURL(sourceURL) {
-			var err error
-			entries, err = readGitCatalogEntries[types.MCPServerCatalogEntryManifest](ctx, sourceURL, token)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read git catalog %s: %w", sourceURL, err)
-			}
-		} else {
-			// If it wasn't a git repo, treat it as a raw file.
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, http.NoBody)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create request for catalog %s: %w", sourceURL, err)
-			}
-			if token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			resp, err := h.httpClient.Do(req)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read catalog %s: %w", sourceURL, err)
-			}
-			defer resp.Body.Close()
-
-			contents, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read catalog %s: %w", sourceURL, err)
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				return nil, fmt.Errorf("unexpected status when reading catalog %s: %s", sourceURL, string(contents))
-			}
-
-			if err = yaml.Unmarshal(contents, &entries); err != nil {
-				return nil, fmt.Errorf("failed to decode catalog %s: %w", sourceURL, err)
-			}
-		}
-	} else {
-		fileInfo, err := os.Stat(sourceURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to stat catalog %s: %w", sourceURL, err)
-		}
-
-		if fileInfo.IsDir() {
-			entries, err = readCatalogDirectory[types.MCPServerCatalogEntryManifest](sourceURL)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read catalog %s: %w", sourceURL, err)
-			}
-		} else {
-			contents, err := os.ReadFile(sourceURL)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read catalog %s: %w", sourceURL, err)
-			}
-
-			if err = yaml.Unmarshal(contents, &entries); err != nil {
-				return nil, fmt.Errorf("failed to decode catalog %s: %w", sourceURL, err)
-			}
-		}
+	entries, err := readCatalogManifests[types.MCPServerCatalogEntryManifest](ctx, h.httpClient, sourceURL, token)
+	if err != nil {
+		return nil, err
 	}
 
 	objs := make([]client.Object, 0, len(entries))
@@ -696,23 +621,14 @@ func (h *Handler) readMCPCatalog(ctx context.Context, catalogName, sourceURL, to
 			// We don't want to mark random MCP servers from the catalog as official.
 		}
 
-		cleanName := sanitizeName(entry.Name)
-		if cleanName == "" {
-			err := fmt.Errorf("invalid catalog entry name after sanitization: original=%q sanitized=%q", entry.Name, cleanName)
+		if err := catalogvalidation.ValidateSourceFields(entry); err != nil {
 			errs = append(errs, err)
 			continue
 		}
+		cleanName := catalogvalidation.SanitizeName(entry.Name)
 		catalogEntryName := name.SafeHashConcatName(catalogName, cleanName)
 
 		if entry.EntryKey != "" {
-			if strings.Contains(entry.EntryKey, catalogReferenceSeparator) {
-				errs = append(errs, fmt.Errorf("source entry key %q cannot contain %s; skipping catalog entry %q", entry.EntryKey, catalogReferenceSeparator, catalogEntryName))
-				continue
-			}
-			if dnsErrs := kvalidation.IsDNS1123Subdomain(entry.EntryKey); len(dnsErrs) > 0 {
-				errs = append(errs, fmt.Errorf("source entry key %q must be DNS-friendly: %s; skipping catalog entry %q", entry.EntryKey, strings.Join(dnsErrs, "; "), catalogEntryName))
-				continue
-			}
 			if _, ok := uniqueEntryKeys[entry.EntryKey]; ok {
 				errs = append(errs, fmt.Errorf("duplicate source entry key %q also used by catalog entry %q", entry.EntryKey, catalogEntryName))
 				continue
@@ -737,17 +653,12 @@ func (h *Handler) readMCPCatalog(ctx context.Context, catalogName, sourceURL, to
 			catalogEntry.Spec.UnsupportedTools = strings.Split(entry.Metadata["unsupportedTools"], ",")
 		}
 
-		sanitizeCatalogEntryManifest(&entry)
-		if err := mcp.ValidateCatalogEntryManifest(ctx, entry, true, h.remoteURLValidationConfig); err != nil {
-			errs = append(errs, fmt.Errorf("failed to validate catalog entry %s: %w", entry.Name, err))
-			continue
-		}
-		// secretBinding references are only allowed for git-managed entries.
-		if err := mcp.ValidateSecretBindingsCatalogEntry(entry, catalogEntry.IsGitManaged(), false, h.mcpBackend); err != nil {
-			errs = append(errs, fmt.Errorf("failed to validate catalog entry %s: %w", entry.Name, err))
-			continue
-		}
-		if err := mcp.ValidateTemplateReferencesCatalogEntry(entry); err != nil {
+		catalogvalidation.NormalizeManifest(&entry)
+		if err := catalogvalidation.ValidateManifest(ctx, entry, catalogvalidation.ValidationOptions{
+			MCP:        h.remoteURLValidationConfig,
+			MCPBackend: h.mcpBackend,
+			GitManaged: catalogEntry.IsGitManaged(),
+		}); err != nil {
 			errs = append(errs, fmt.Errorf("failed to validate catalog entry %s: %w", entry.Name, err))
 			continue
 		}
@@ -821,202 +732,28 @@ func readCatalogManifests[T any](ctx context.Context, httpClient *http.Client, s
 	return entries, nil
 }
 
-func sanitizeCatalogEntryManifest(entry *types.MCPServerCatalogEntryManifest) {
-	for i, env := range entry.Env {
-		if env.Key == "" {
-			env.Key = env.Name
-		}
-		if filepath.Ext(env.Key) != "" {
-			env.Key = strings.ReplaceAll(env.Key, ".", "_")
-			env.File = true
-		}
-		env.Key = strings.ReplaceAll(strings.ToUpper(env.Key), "-", "_")
-		entry.Env[i] = env
-	}
-
-	if entry.Runtime == types.RuntimeRemote && entry.RemoteConfig != nil {
-		for i, header := range entry.RemoteConfig.Headers {
-			if header.Key == "" {
-				header.Key = header.Name
-			}
-			header.Key = strings.ReplaceAll(strings.ToUpper(header.Key), "_", "-")
-			entry.RemoteConfig.Headers[i] = header
-		}
-	}
-
-	if entry.ServerUserType == "" {
-		entry.ServerUserType = types.ServerUserTypeSingleUser
-	}
-}
-
-// isPathSafe checks if a file path is safe to read (not a symlink and within bounds).
-func isPathSafe(path, baseDir string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("symbolic links are not allowed for security reasons")
-	}
-
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path: %w", err)
-	}
-
-	absBaseDir, err := filepath.Abs(baseDir)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute base directory: %w", err)
-	}
-
-	if !strings.HasPrefix(absPath, absBaseDir+string(filepath.Separator)) {
-		return fmt.Errorf("file path is outside the allowed directory")
-	}
-
-	return nil
-}
-
 func readCatalogDirectory[T any](catalog string) ([]T, error) {
-	var (
-		catalogPatterns       = []string{"*.json", "*.yaml", "*.yml"} // Default to all JSON and YAML files
-		ignorePatterns        []string
-		usingObotCatalogsFile bool
-	)
-
-	// First try to get .obotcatalogs file
-	obotCatalogsPath := filepath.Join(catalog, ".obotcatalogs")
-	if content, err := os.ReadFile(obotCatalogsPath); err == nil {
-		usingObotCatalogsFile = true
-		scanner := bufio.NewScanner(strings.NewReader(string(content)))
-		var patterns []string
-		for scanner.Scan() {
-			line := scanner.Text()
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				patterns = append(patterns, line)
-			}
-		}
-		if scanner.Err() != nil && scanner.Err() != io.EOF {
-			log.Warnf("Failed to read .obotcatalogs file: %v", scanner.Err())
-		} else if len(patterns) > 0 {
-			catalogPatterns = patterns
-		}
-	}
-
-	obotIgnoreCatalogsPath := filepath.Join(catalog, ".ignoreobotcatalogs")
-	if content, err := os.ReadFile(obotIgnoreCatalogsPath); err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(string(content)))
-		var patterns []string
-		for scanner.Scan() {
-			line := scanner.Text()
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				patterns = append(patterns, line)
-			}
-		}
-		if scanner.Err() != nil && scanner.Err() != io.EOF {
-			log.Warnf("Failed to read .ignoreobotcatalogs file: %v", scanner.Err())
-		} else if len(patterns) > 0 {
-			ignorePatterns = patterns
-		}
-	}
-
-	// Walk through the cloned repository to find matching files
-	var (
-		entries   []T
-		fileCount int
-	)
-	const maxFiles = 1000 // Limit the number of files processed to prevent resource exhaustion
-
-	err := filepath.WalkDir(catalog, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get relative path from repository root
-		relPath, err := filepath.Rel(catalog, path)
-		if err != nil {
-			return err
-		}
-
-		// Skip the .git directory specifically
-		if d.IsDir() && (relPath == ".git" || strings.HasPrefix(relPath, ".git/")) {
-			return filepath.SkipDir
-		}
-
-		// Skip directories (but continue walking into them)
-		if d.IsDir() {
-			for _, pattern := range ignorePatterns {
-				if matched, _ := filepath.Match(pattern, relPath); matched {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-
-		// Check if file matches any pattern
-		var matches bool
-		for _, pattern := range catalogPatterns {
-			if matched, _ := filepath.Match(pattern, filepath.Base(relPath)); matched {
-				matches = true
-				break
-			}
-		}
-		if !matches {
-			return nil
-		}
-
-		// Check if file matches any ignore pattern
-		for _, pattern := range ignorePatterns {
-			if matched, _ := filepath.Match(pattern, relPath); matched {
-				return nil
-			}
-		}
-
-		// Security check: ensure the file is safe to read
-		if err := isPathSafe(path, catalog); err != nil {
-			log.Warnf("Skipping unsafe file %s: %v", relPath, err)
-			return nil
-		}
-
-		// Check file count limit
-		fileCount++
-		if fileCount > maxFiles {
-			return fmt.Errorf("too many files to process (limit: %d)", maxFiles)
-		}
-
-		// Read file contents
-		content, err := os.ReadFile(path)
-		if err != nil {
-			log.Warnf("Failed to read contents of %s: %v", relPath, err)
-			return nil
-		}
-
-		// Try to unmarshal as array first
-		var fileEntries []T
-		if err := yaml.Unmarshal(content, &fileEntries); err != nil {
-			// If that fails, try single object with YAML
-			var entry T
-			if err := yaml.Unmarshal(content, &entry); err != nil {
-				if usingObotCatalogsFile {
-					log.Warnf("Failed to parse %s as catalog entry: %v", relPath, err)
-				} else {
-					log.Debugf("Failed to parse %s as catalog entry: %v", relPath, err)
-				}
-				return nil
-			}
-			fileEntries = []T{entry}
-		}
-
-		entries = append(entries, fileEntries...)
-		return nil
-	})
-
+	files, usingObotCatalogsFile, err := catalogvalidation.WalkCatalogFiles(catalog)
 	if err != nil {
 		return nil, fmt.Errorf("failed to walk repository files: %w", err)
 	}
 
+	var entries []T
+	for path, walkErr := range files {
+		if walkErr != nil {
+			return nil, fmt.Errorf("failed to walk repository files: %w", walkErr)
+		}
+		fileEntries, _, err := catalogvalidation.DecodeCatalogFile[T](path, false)
+		if err == nil {
+			entries = append(entries, fileEntries...)
+			continue
+		}
+		if usingObotCatalogsFile {
+			log.Warnf("Failed to parse %s as catalog entry: %v", path, err)
+		} else {
+			log.Debugf("Failed to parse %s as catalog entry: %v", path, err)
+		}
+	}
 	return entries, nil
 }
 
