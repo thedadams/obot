@@ -13,9 +13,15 @@ import (
 
 func TestHTTPClientForServer(t *testing.T) {
 	const timeout = 3 * time.Second
+	backend := &kubernetesBackend{
+		httpListenPort:   8080,
+		mcpNamespace:     "obot-mcp",
+		mcpClusterDomain: "cluster.local",
+		serviceFQDN:      "obot.obot-system.svc.cluster.local",
+	}
 
 	t.Run("direct server", func(t *testing.T) {
-		httpClient, err := (&SessionManager{}).HTTPClientForServer(ServerConfig{}, nil, nil, timeout)
+		httpClient, err := (&SessionManager{backend: backend}).HTTPClientForServer(ServerConfig{}, nil, nil, timeout)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -40,7 +46,7 @@ func TestHTTPClientForServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		httpClient, err := (&SessionManager{}).HTTPClientForServer(
+		httpClient, err := (&SessionManager{backend: backend}).HTTPClientForServer(
 			ServerConfig{},
 			[]string{serverURL.Host},
 			http.Header{"X-MCP-Test": {"injected"}},
@@ -53,6 +59,36 @@ func TestHTTPClientForServer(t *testing.T) {
 		response, err := httpClient.Get(server.URL)
 		if err != nil {
 			t.Fatalf("allow-listed direct request failed: %v", err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("response status = %d, want %d", response.StatusCode, http.StatusNoContent)
+		}
+	})
+
+	t.Run("direct server uses Kubernetes backend allow list", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+
+		serverURL, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		httpClient, err := (&SessionManager{
+			backend: &kubernetesBackend{
+				serviceFQDN: serverURL.Host,
+			},
+		}).HTTPClientForServer(ServerConfig{}, nil, nil, timeout)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		response, err := httpClient.Get(server.URL)
+		if err != nil {
+			t.Fatalf("request to backend-allowlisted server failed: %v", err)
 		}
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusNoContent {
