@@ -1,4 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
+import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
@@ -26,11 +27,45 @@ export default defineConfig(({ mode }) => {
 	return {
 		server: {
 			port: 5174,
-			proxy: {
-				'/api': proxyConfig,
-				'/oauth2': proxyConfig
-			}
+			proxy:
+				mode === 'test'
+					? undefined
+					: {
+							'/api': proxyConfig,
+							'/oauth2': proxyConfig
+						}
 		},
-		plugins: [sveltekit()]
+		plugins: [sveltekit()],
+		test: {
+			projects: [
+				{
+					// Client-side tests (Svelte components)
+					extends: true,
+					test: {
+						name: 'client',
+						// Timeout for browser tests - prevent hanging on element lookups
+						testTimeout: 2000,
+						browser: {
+							enabled: true,
+							provider: playwright(),
+							screenshotFailures: false,
+							instances: [{ browser: 'chromium', viewport: { width: 1280, height: 720 } }]
+						},
+						include: ['src/**/*.svelte.{test,spec}.{js,ts}'],
+						exclude: ['src/lib/server/**', 'src/**/*.ssr.{test,spec}.{js,ts}'],
+						setupFiles: ['vitest-browser-svelte', 'src/tests/vitest-setup.ts']
+					}
+				},
+				{
+					extends: true,
+					test: {
+						name: 'server',
+						environment: 'node',
+						include: ['src/**/*.{test,spec}.{js,ts}'],
+						exclude: ['src/**/*.svelte.{test,spec}.{js,ts}', 'src/**/*.ssr.{test,spec}.{js,ts}']
+					}
+				}
+			]
+		}
 	};
 });
