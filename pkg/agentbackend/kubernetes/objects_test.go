@@ -2,16 +2,17 @@ package kubernetes
 
 import (
 	"encoding/json"
-
+	"reflect"
 	"testing"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/obot-platform/obot/pkg/agentbackend"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sscheme "k8s.io/client-go/kubernetes/scheme"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func testBackend(t *testing.T) *Backend {
@@ -34,6 +35,150 @@ func desiredInstance() agentbackend.DesiredInstance {
 		Image:    "example.com/agent:v1",
 		Requests: agentbackend.InstanceResources{CPUVCPUs: 0.5, MemoryBytes: 1 << 30},
 		Limits:   agentbackend.InstanceResources{CPUVCPUs: 2, MemoryBytes: 4 << 30},
+	}
+}
+
+func TestHostedAgentPodScheduling(t *testing.T) {
+	affinity := &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+					MatchExpressions: []corev1.NodeSelectorRequirement{{
+						Key:      "workload",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"hosted-agent"},
+					}},
+				}},
+			},
+		},
+	}
+	tolerations := []corev1.Toleration{{
+		Key:      "workload",
+		Operator: corev1.TolerationOpEqual,
+		Value:    "hosted-agent",
+		Effect:   corev1.TaintEffectNoSchedule,
+	}}
+	nodeSelector := map[string]string{"node-pool": "agents"}
+	backend, err := New(nil, nil, Options{
+		Namespace:     "obot-agents",
+		ClusterDomain: "cluster.local",
+		Affinity:      affinity,
+		Tolerations:   tolerations,
+		NodeSelector:  nodeSelector,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	objects, err := backend.instanceObjects(desiredInstance())
+	if err != nil {
+		t.Fatalf("instanceObjects: %v", err)
+	}
+	cleanup, err := backend.cleanupJob("inst-1", "alloc-1")
+	if err != nil {
+		t.Fatalf("cleanupJob: %v", err)
+	}
+
+	specs := map[string]*corev1.PodSpec{
+		"sandbox": &deploymentFrom(t, objects).Spec.Template.Spec,
+		"cleanup": &cleanup.Spec.Template.Spec,
+	}
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			if !reflect.DeepEqual(spec.Affinity, affinity) {
+				t.Errorf("unexpected affinity: %#v", spec.Affinity)
+			}
+			if !reflect.DeepEqual(spec.Tolerations, tolerations) {
+				t.Errorf("unexpected tolerations: %#v", spec.Tolerations)
+			}
+			if !reflect.DeepEqual(spec.NodeSelector, nodeSelector) {
+				t.Errorf("unexpected node selector: %#v", spec.NodeSelector)
+			}
+		})
+	}
+
+	// Each workload gets its own copy; mutating one generated pod template must
+	// not alter another or the backend's deployment-wide settings.
+	specs["sandbox"].NodeSelector["node-pool"] = "other"
+	if got := specs["cleanup"].NodeSelector["node-pool"]; got != "agents" {
+		t.Fatalf("sandbox node selector mutation leaked to cleanup job: %q", got)
+	}
+	if got := backend.opts.NodeSelector["node-pool"]; got != "agents" {
+		t.Fatalf("sandbox node selector mutation leaked to backend options: %q", got)
+	}
+}
+
+func TestHostedAgentPodSchedulingDefaultsAreEmpty(t *testing.T) {
+	backend := testBackend(t)
+	objects, err := backend.instanceObjects(desiredInstance())
+	if err != nil {
+		t.Fatalf("instanceObjects: %v", err)
+	}
+	cleanup, err := backend.cleanupJob("inst-1", "alloc-1")
+	if err != nil {
+		t.Fatalf("cleanupJob: %v", err)
+	}
+
+	for name, spec := range map[string]*corev1.PodSpec{
+		"sandbox": &deploymentFrom(t, objects).Spec.Template.Spec,
+		"cleanup": &cleanup.Spec.Template.Spec,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if spec.Affinity != nil || len(spec.Tolerations) != 0 || len(spec.NodeSelector) != 0 {
+				t.Fatalf("expected empty scheduling fields, got %+v", spec)
+			}
+		})
+	}
+}
+
+func TestObserveInstanceDetectsPodSchedulingChanges(t *testing.T) {
+	desired := desiredInstance()
+	configured := Options{
+		Namespace:     "obot-agents",
+		ClusterDomain: "cluster.local",
+		NodeSelector:  map[string]string{"node-pool": "agents"},
+	}
+	changed := Options{
+		Namespace:     "obot-agents",
+		ClusterDomain: "cluster.local",
+		NodeSelector:  map[string]string{"node-pool": "gpu-agents"},
+	}
+	empty := Options{Namespace: "obot-agents", ClusterDomain: "cluster.local"}
+
+	for _, tt := range []struct {
+		name             string
+		applied          Options
+		observed         Options
+		observedRevision string
+	}{
+		{name: "unchanged", applied: configured, observed: configured, observedRevision: desired.Revision},
+		{name: "added", applied: empty, observed: configured},
+		{name: "changed", applied: configured, observed: changed},
+		{name: "removed", applied: configured, observed: empty},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			appliedBackend, err := New(nil, nil, tt.applied)
+			if err != nil {
+				t.Fatalf("New applied backend: %v", err)
+			}
+			objects, err := appliedBackend.instanceObjects(desired)
+			if err != nil {
+				t.Fatalf("instanceObjects: %v", err)
+			}
+
+			client := fake.NewClientBuilder().WithScheme(k8sscheme.Scheme).WithObjects(deploymentFrom(t, objects)).Build()
+			observingBackend, err := New(client, client, tt.observed)
+			if err != nil {
+				t.Fatalf("New observing backend: %v", err)
+			}
+			observation, err := observingBackend.ObserveInstance(t.Context(), desired.Ref)
+			if err != nil {
+				t.Fatalf("ObserveInstance: %v", err)
+			}
+			if observation.ObservedRevision != tt.observedRevision {
+				t.Fatalf("observed revision = %q, want %q", observation.ObservedRevision, tt.observedRevision)
+			}
+		})
 	}
 }
 

@@ -81,6 +81,12 @@ func (b *Backend) ObserveInstance(ctx context.Context, ref agentbackend.Instance
 	// against the desired revision to decide whether it still needs to write,
 	// and reads State separately to decide whether the sandbox is usable.
 	observation.ObservedRevision = deployment.Annotations[revisionAnnotation]
+	if deployment.Spec.Template.Annotations[schedulingRevisionAnnotation] != b.podSchedulingRevision() {
+		// Scheduling defaults are deployment-wide and are not part of the
+		// desired agent revision. Report drift so the controller invokes
+		// ReconcileInstance on its next pass.
+		observation.ObservedRevision = ""
+	}
 	observation.BackendGeneration = deployment.Generation
 	// An agent with no port serves nothing, so publishing an address for it
 	// would offer a link that cannot work.
@@ -296,6 +302,10 @@ func (b *Backend) instanceObjects(desired agentbackend.DesiredInstance) ([]kclie
 
 	podLabels := make(map[string]string, len(labels))
 	maps.Copy(podLabels, labels)
+	podAnnotations := maps.Clone(annotations)
+	if schedulingRevision := b.podSchedulingRevision(); schedulingRevision != "" {
+		podAnnotations[schedulingRevisionAnnotation] = schedulingRevision
+	}
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -318,7 +328,7 @@ func (b *Backend) instanceObjects(desired agentbackend.DesiredInstance) ([]kclie
 					Labels: podLabels,
 					// Carried on the template as well as the Deployment so a
 					// revision change actually replaces the pod.
-					Annotations: annotations,
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					// Ties the sandbox to its pool's quota. Every pool shares one
@@ -355,6 +365,7 @@ func (b *Backend) instanceObjects(desired agentbackend.DesiredInstance) ([]kclie
 	if b.opts.RuntimeClassName != "" {
 		deployment.Spec.Template.Spec.RuntimeClassName = new(b.opts.RuntimeClassName)
 	}
+	b.setPodScheduling(&deployment.Spec.Template.Spec)
 
 	for _, pullSecret := range b.opts.ImagePullSecrets {
 		deployment.Spec.Template.Spec.ImagePullSecrets = append(
@@ -518,7 +529,7 @@ func (b *Backend) cleanupJob(instanceID, poolID string) (*batchv1.Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &batchv1.Job{
+	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cleanupJobName(instanceID),
 			Namespace: b.opts.Namespace,
@@ -573,7 +584,24 @@ func (b *Backend) cleanupJob(instanceID, poolID string) (*batchv1.Job, error) {
 				},
 			},
 		},
-	}, nil
+	}
+	b.setPodScheduling(&job.Spec.Template.Spec)
+	return job, nil
+}
+
+func (b *Backend) setPodScheduling(spec *corev1.PodSpec) {
+	if b.opts.Affinity != nil {
+		spec.Affinity = b.opts.Affinity.DeepCopy()
+	}
+	if len(b.opts.Tolerations) > 0 {
+		spec.Tolerations = make([]corev1.Toleration, len(b.opts.Tolerations))
+		for i := range b.opts.Tolerations {
+			b.opts.Tolerations[i].DeepCopyInto(&spec.Tolerations[i])
+		}
+	}
+	if len(b.opts.NodeSelector) > 0 {
+		spec.NodeSelector = maps.Clone(b.opts.NodeSelector)
+	}
 }
 
 // cleanupResources keeps the job small and Guaranteed. Deleting a sandbox must
