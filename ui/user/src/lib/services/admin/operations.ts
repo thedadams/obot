@@ -758,8 +758,23 @@ export async function redeployMCPCatalogServerWithK8sSettings(
 
 // MCP capacity
 
-export async function getMCPCapacity(opts?: { fetch?: Fetcher }): Promise<MCPCapacityInfo> {
+export async function getMCPCapacity(opts?: {
+	fetch?: Fetcher;
+	dontLogErrors?: boolean;
+}): Promise<MCPCapacityInfo> {
 	const response = (await doGet('/mcp-capacity', opts)) as MCPCapacityInfo;
+	return response;
+}
+
+export async function getMCPCatalogEntryCapacity(
+	catalogID: string,
+	entryID: string,
+	opts?: { fetch?: Fetcher; dontLogErrors?: boolean }
+): Promise<MCPCapacityInfo> {
+	const response = (await doGet(
+		`/mcp-catalogs/${catalogID}/entries/${entryID}/mcp-capacity`,
+		opts
+	)) as MCPCapacityInfo;
 	return response;
 }
 
