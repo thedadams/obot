@@ -350,6 +350,9 @@ func CompositeServerToServerConfig(mcpServer v1.MCPServer, components []v1.MCPSe
 }
 
 func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, scope, mcpCatalogName string, credEnv, secretsCred, staticOAuthCred map[string]string) (ServerConfig, []string, error) {
+	if _, err := ValidateConfiguredOptions(mcpServer.Spec.Manifest.Env, remoteHeaders(mcpServer.Spec.Manifest.RemoteConfig), credEnv); err != nil {
+		return ServerConfig{}, nil, err
+	}
 	// Catalog-managed literal values are static configuration, not user credentials.
 	// Make them available while expanding runtime arguments, but keep them separate
 	// from credEnv so they are never persisted or exposed as user-supplied secrets.
@@ -501,6 +504,9 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 
 // SystemServerToServerConfig converts a v1.SystemMCPServer to a ServerConfig for deployment
 func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []string, userID string, credEnv, secretsCred map[string]string) (ServerConfig, []string, error) {
+	if _, err := ValidateConfiguredOptions(systemServer.Spec.Manifest.Env, remoteHeaders(systemServer.Spec.Manifest.RemoteConfig), credEnv); err != nil {
+		return ServerConfig{}, nil, err
+	}
 	fileEnvVars := make(map[string]struct{})
 	for _, env := range systemServer.Spec.Manifest.Env {
 		if env.File {

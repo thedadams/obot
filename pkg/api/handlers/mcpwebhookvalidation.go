@@ -516,12 +516,21 @@ func systemMCPServerManifestFromCatalogEntry(entry types.SystemMCPServerCatalogE
 
 func applyRemoteURLTemplateToWebhookValidation(ctx context.Context, webhookValidation *v1.MCPWebhookValidation, envVars map[string]string, options mcp.ValidationOptions) error {
 	manifest := webhookValidation.Spec.Manifest.SystemMCPServerManifest
-	if manifest == nil || manifest.Runtime != types.RuntimeRemote || manifest.RemoteConfig == nil || manifest.RemoteConfig.URLTemplate == "" {
+	if manifest == nil {
+		return nil
+	}
+	if err := validateConfiguredOptions(manifest.Env, manifest.RemoteConfig, envVars); err != nil {
+		return types.NewErrBadRequest("invalid configuration: %v", err)
+	}
+	if manifest.Runtime != types.RuntimeRemote || manifest.RemoteConfig == nil || manifest.RemoteConfig.URLTemplate == "" {
 		return nil
 	}
 
-	finalURL, err := applyURLTemplate(manifest.RemoteConfig.URLTemplate, envVars)
+	finalURL, err := applyURLTemplate(manifest.RemoteConfig.URLTemplate, manifest.Env, manifest.RemoteConfig.Headers, envVars)
 	if err != nil {
+		if configErr, ok := errors.AsType[*urlTemplateConfigurationError](err); ok {
+			return types.NewErrBadRequest("invalid configuration: %v", configErr)
+		}
 		return fmt.Errorf("failed to apply URL template: %w", err)
 	}
 

@@ -535,10 +535,10 @@ func serverInstanceHeaders(instance v1.MCPServerInstance, credEnv map[string]str
 	var headerNames, headerValues, missingHeaders []string
 	for _, header := range instance.Spec.MultiUserConfig.UserDefinedHeaders {
 		val := credEnv[header.Key]
-		if val != "" {
+		if val != "" && ConfigurationOptionValueValid(header, credEnv) {
 			headerNames = append(headerNames, header.Key)
 			headerValues = append(headerValues, applyMCPServerInstanceHeaderPrefix(val, header.Prefix))
-		} else if header.Required {
+		} else if header.Required || val != "" {
 			missingHeaders = append(missingHeaders, header.Key)
 		}
 	}

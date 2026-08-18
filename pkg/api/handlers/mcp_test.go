@@ -649,8 +649,7 @@ func TestApplyURLTemplate(t *testing.T) {
 				"API_HOST":  "api.example.com",
 				"EMPTY_VAR": "",
 			},
-			expected:    "https://api.example.com/api//data",
-			expectError: false,
+			expectError: true,
 		},
 		{
 			name:     "variable with spaces",
@@ -680,7 +679,7 @@ func TestApplyURLTemplate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := applyURLTemplate(tt.template, tt.envVars)
+			result, err := applyURLTemplate(tt.template, nil, nil, tt.envVars)
 
 			if tt.expectError {
 				if err == nil {
@@ -705,10 +704,18 @@ func TestApplyRemoteURLTemplate(t *testing.T) {
 	manifest := types.MCPServerManifest{
 		Name:    "OAuth Remote",
 		Runtime: types.RuntimeRemote,
+		Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{
+			Key:   "HOST",
+			Value: "remote.example.com",
+		}}},
 		RemoteConfig: &types.RemoteRuntimeConfig{
 			IsTemplate:          true,
-			URLTemplate:         "https://${HOST}/mcp/projects/${PROJECT_ID}",
+			URLTemplate:         "https://${HOST}/mcp/${API_VERSION}/projects/${PROJECT_ID}",
 			StaticOAuthRequired: true,
+			Headers: []types.MCPHeader{{
+				Key:   "API_VERSION",
+				Value: "v1",
+			}},
 		},
 	}
 	options := mcp.ValidationOptions{
@@ -720,11 +727,10 @@ func TestApplyRemoteURLTemplate(t *testing.T) {
 	}
 
 	err := applyRemoteURLTemplate(t.Context(), &manifest, map[string]string{
-		"HOST":       "remote.example.com",
 		"PROJECT_ID": "project-123",
 	}, false, options)
 	require.NoError(t, err)
-	require.Equal(t, "https://remote.example.com/mcp/projects/project-123", manifest.RemoteConfig.URL)
+	require.Equal(t, "https://remote.example.com/mcp/v1/projects/project-123", manifest.RemoteConfig.URL)
 	require.True(t, manifest.RemoteConfig.StaticOAuthRequired)
 
 	server := v1.MCPServer{ObjectMeta: metav1.ObjectMeta{Name: "tool-preview"}, Spec: v1.MCPServerSpec{Manifest: manifest}}
@@ -732,6 +738,20 @@ func TestApplyRemoteURLTemplate(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, missing)
 	require.Equal(t, manifest.RemoteConfig.URL, serverConfig.URL)
+}
+
+func TestApplyURLTemplateStaticValuesOverrideSubmittedConfiguration(t *testing.T) {
+	result, err := applyURLTemplate(
+		"https://${HOST}/${VERSION}",
+		[]types.MCPEnv{{MCPHeader: types.MCPHeader{Key: "HOST", Value: "catalog.example.com"}}},
+		[]types.MCPHeader{{Key: "VERSION", Value: "v1"}},
+		map[string]string{
+			"HOST":    "forged.example.com",
+			"VERSION": "forged",
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "https://catalog.example.com/v1", result)
 }
 
 func TestApplyRemoteURLTemplateRejectsInvalidRenderedURL(t *testing.T) {
@@ -748,6 +768,22 @@ func TestApplyRemoteURLTemplateRejectsInvalidRenderedURL(t *testing.T) {
 	require.ErrorContains(t, err, "URL scheme must be either https or http")
 }
 
+func TestApplyRemoteURLTemplateRejectsMissingConfiguration(t *testing.T) {
+	manifest := types.MCPServerManifest{
+		Runtime: types.RuntimeRemote,
+		RemoteConfig: &types.RemoteRuntimeConfig{
+			IsTemplate:  true,
+			URLTemplate: "https://remote.example.com/mcp/${PROJECT_ID}",
+		},
+	}
+
+	err := applyRemoteURLTemplate(t.Context(), &manifest, nil, false, mcp.ValidationOptions{})
+	require.Error(t, err)
+	var configErr *urlTemplateConfigurationError
+	require.ErrorAs(t, err, &configErr)
+	require.ErrorContains(t, err, `configuration value "PROJECT_ID" referenced by remoteConfig.urlTemplate is required`)
+}
+
 func TestApplyURLTemplateEdgeCases(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -755,13 +791,14 @@ func TestApplyURLTemplateEdgeCases(t *testing.T) {
 		envVars     map[string]string
 		description string
 		expected    string
+		expectError bool
 	}{
 		{
-			name:        "unmatched variable remains",
+			name:        "unmatched variable is rejected",
 			template:    "https://${API_HOST}/api/${MISSING_VAR}/data",
 			envVars:     map[string]string{"API_HOST": "api.example.com"},
-			description: "Variables not in envVars should remain unchanged in the result",
-			expected:    "https://api.example.com/api/${MISSING_VAR}/data",
+			description: "Every referenced variable must resolve before the URL is used",
+			expectError: true,
 		},
 		{
 			name:        "case sensitive variables",
@@ -774,7 +811,13 @@ func TestApplyURLTemplateEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := applyURLTemplate(tt.template, tt.envVars)
+			result, err := applyURLTemplate(tt.template, nil, nil, tt.envVars)
+			if tt.expectError {
+				require.Error(t, err)
+				var configErr *urlTemplateConfigurationError
+				require.ErrorAs(t, err, &configErr)
+				return
+			}
 
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -804,7 +847,7 @@ func TestApplyURLTemplatePerformance(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := applyURLTemplate(template.String(), largeEnvVars)
+	result, err := applyURLTemplate(template.String(), nil, nil, largeEnvVars)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -876,7 +919,7 @@ func TestApplyURLTemplateRealWorldExamples(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := applyURLTemplate(tt.template, tt.envVars)
+			result, err := applyURLTemplate(tt.template, nil, nil, tt.envVars)
 
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -1276,6 +1319,40 @@ func TestCreateCatalogEntryRejectsMultiUserHeaderSecretBinding(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "secretBinding is not supported for user-defined headers")
+}
+
+func TestCreateCatalogEntryAllowsConfigurationOptions(t *testing.T) {
+	storage := newFakeStorage(t, &v1.MCPCatalog{ObjectMeta: metav1.ObjectMeta{Name: "catalog-1", Namespace: system.DefaultNamespace}})
+	options := []types.MCPConfigurationOption{
+		{Name: "United States", Value: "us", Description: "US endpoint"},
+		{Name: "Europe", Value: "eu", Description: "EU endpoint"},
+	}
+	manifest := types.MCPServerCatalogEntryManifest{
+		Name:           "option-entry",
+		Runtime:        types.RuntimeNPX,
+		ServerUserType: types.ServerUserTypeSingleUser,
+		NPXConfig:      &types.NPXRuntimeConfig{Package: "test-server"},
+		Env: []types.MCPEnv{{MCPHeader: types.MCPHeader{
+			Key: "REGION", Name: "Region", Required: true, Options: options,
+		}}},
+	}
+	body, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/mcp-catalogs/catalog-1/entries", bytes.NewReader(body))
+	req.SetPathValue("catalog_id", "catalog-1")
+
+	err = (&MCPCatalogHandler{mcpBackend: "docker", sessionManager: &mcp.SessionManager{}}).CreateEntry(api.Context{
+		ResponseWriter: httptest.NewRecorder(),
+		Request:        req,
+		Storage:        storage,
+		User:           testUserWithRole("admin", types.GroupAdmin),
+	})
+
+	require.NoError(t, err)
+	var entries v1.MCPServerCatalogEntryList
+	require.NoError(t, storage.List(t.Context(), &entries))
+	require.Len(t, entries.Items, 1)
+	assert.Equal(t, options, entries.Items[0].Spec.Manifest.Env[0].Options)
 }
 
 func newCreateServerSecretBindingTestHandler() *MCPHandler {
