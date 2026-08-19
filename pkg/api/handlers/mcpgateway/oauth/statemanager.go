@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/obot-platform/obot/pkg/gateway/client"
+	"github.com/obot-platform/obot/pkg/mcp"
 	"golang.org/x/oauth2"
 )
 
@@ -19,8 +20,8 @@ func newStateManager(gatewayClient *client.Client) *stateManager {
 	}
 }
 
-func (sm *stateManager) store(ctx context.Context, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier string, conf *oauth2.Config) error {
-	return sm.gatewayClient.CreateMCPOAuthPendingState(ctx, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier, conf)
+func (sm *stateManager) store(ctx context.Context, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier, resourceURL string, conf *oauth2.Config) error {
+	return sm.gatewayClient.CreateMCPOAuthPendingState(ctx, userID, mcpID, mcpURL, oauthAuthRequestID, state, verifier, resourceURL, conf)
 }
 
 func (sm *stateManager) createToken(ctx context.Context, state, code, errorStr, errorDescription string) (string, string, error) {
@@ -49,7 +50,7 @@ func (sm *stateManager) createToken(ctx context.Context, state, code, errorStr, 
 		conf.Scopes = strings.Split(ps.Scopes, " ")
 	}
 
-	token, err := conf.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", ps.Verifier))
+	token, err := mcp.ExchangeOAuthToken(ctx, conf, code, ps.Verifier, ps.ResourceURL)
 	if err != nil {
 		_ = sm.gatewayClient.DeleteMCPOAuthPendingState(ctx, ps.HashedState)
 		return "", "", fmt.Errorf("failed to exchange code: %w", err)
