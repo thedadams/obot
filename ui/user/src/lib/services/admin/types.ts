@@ -130,6 +130,7 @@ export interface AuditLogExport {
 	llmFilters?: LLMAuditLogExportFilters;
 }
 export interface AuditLogExportFilterResponse {
+	apiKeyIDs?: number[];
 	sourceTypes?: string[];
 	// Common cross-source filters (used when more than one source is selected).
 	actors?: string[];
@@ -158,6 +159,7 @@ export interface AuditLogExportFilterResponse {
 	query?: string;
 }
 export type AuditLogExportFilters = {
+	apiKeyIDs?: number[];
 	sourceTypes?: string[];
 	// Common cross-source filters (used when more than one source is selected).
 	actors?: string[];
@@ -215,6 +217,7 @@ export interface ScheduledAuditLogExport {
 }
 
 export type LLMAuditLogExportFilters = {
+	apiKeyIDs?: number[];
 	userIDs?: string[];
 	modelProviders?: string[];
 	targetModels?: string[];
@@ -601,6 +604,8 @@ export interface CommunityLicenseEnrollment {
 // LLM audit logs
 
 export interface LLMAuditLog {
+	apiKeyID?: number;
+	apiKeyName?: string;
 	clientIP: string;
 	clientSessionID: string;
 	userAgent: string;
@@ -630,6 +635,7 @@ export interface LLMAuditLog {
 }
 
 export type LLMAuditLogURLFilters = {
+	api_key_id?: string | null;
 	client_session_id?: string | null;
 	end_time?: string | null;
 	hide_models_requests?: string | null;

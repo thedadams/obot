@@ -142,6 +142,7 @@ func (a *auditLogInput) UnmarshalJSON(data []byte) error {
 // Callers are responsible for setting any additional fields (e.g. default Limit, WithRequestAndResponse).
 func parseAuditLogOpts(query url.Values) gateway.MCPAuditLogOptions {
 	opts := gateway.MCPAuditLogOptions{
+		APIKeyID:                  api.ParseUintList(query["api_key_id"]),
 		UserID:                    parseMultiValueParam(query, "user_id"),
 		MCPID:                     parseMultiValueParam(query, "mcp_id"),
 		MCPServerDisplayName:      parseMultiValueParam(query, "mcp_server_display_name"),
@@ -608,6 +609,16 @@ func (h *AuditLogHandler) ListAuditLogFilterOptions(req api.Context) error {
 				"options": []string{},
 			})
 		}
+	}
+	if filter == "api_key_id" {
+		if err := validateAuditLogOptions(opts); err != nil {
+			return err
+		}
+		options, err := req.GatewayClient.GetMCPAuditLogAPIKeyFilterOptions(req.Context(), opts)
+		if err != nil {
+			return err
+		}
+		return req.Write(map[string]any{"options": options})
 	}
 
 	availableOptions := make(map[string]any, len(filterOptions)+len(localAgentFilterOptions))

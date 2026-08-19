@@ -236,39 +236,9 @@ func (c *Client) GetMCPAuditLogs(ctx context.Context, opts MCPAuditLogOptions) (
 		return nil, 0, err
 	}
 
-	db := c.db.WithContext(ctx).Model(&types.MCPAuditLog{}).Where("source_type IN ?", sources)
-	if opts.Query != "" {
-		var err error
-		db, err = c.applyAuditLogSearch(ctx, db, opts.Query)
-		if err != nil {
-			return nil, 0, err
-		}
-	}
-
-	if len(opts.UserID) > 0 {
-		db = db.Where("user_id IN ?", opts.UserID)
-	}
-	if len(opts.SessionID) > 0 {
-		db = db.Where("session_id IN ?", opts.SessionID)
-	}
-	if len(opts.ClientIP) > 0 {
-		db = db.Where("client_ip IN ?", opts.ClientIP)
-	}
-
-	eventTime := auditLogEventTimeExpression(sources)
-	if !opts.StartTime.IsZero() {
-		db = db.Where(eventTime+" >= ?", opts.StartTime.UTC())
-	}
-	if !opts.EndTime.IsZero() {
-		db = db.Where(eventTime+" < ?", opts.EndTime.UTC())
-	}
-	if opts.ProcessingTimeMin > 0 {
-		db = db.Where("CASE WHEN source_type = ? THEN duration_ms ELSE processing_time_ms END >= ?",
-			types2.AuditLogSourceTypeLocalAgentToolCall, opts.ProcessingTimeMin)
-	}
-	if opts.ProcessingTimeMax > 0 {
-		db = db.Where("CASE WHEN source_type = ? THEN duration_ms ELSE processing_time_ms END <= ?",
-			types2.AuditLogSourceTypeLocalAgentToolCall, opts.ProcessingTimeMax)
+	db, eventTime, err := c.auditLogBaseQuery(ctx, opts, sources)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	if hasMCPAuditLogFilters(opts) {
@@ -290,7 +260,7 @@ func (c *Client) GetMCPAuditLogs(ctx context.Context, opts MCPAuditLogOptions) (
 		return nil, 0, err
 	}
 
-	sortExpression, err := auditLogSortExpression(opts, sources)
+	sortExpression, err := auditLogSortExpression(opts, sources, eventTime)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -320,6 +290,38 @@ func (c *Client) GetMCPAuditLogs(ctx context.Context, opts MCPAuditLogOptions) (
 		}
 	}
 	return logs, total, nil
+}
+
+// auditLogBaseQuery applies the source, search, shared-column, time, and duration filters common
+// to audit-log list and filter-option queries. It also returns the effective event-time expression
+// used by the time filters so list queries can reuse it for ordering. Callers add source-specific
+// and unified filters.
+func (c *Client) auditLogBaseQuery(ctx context.Context, opts MCPAuditLogOptions, sources []types2.AuditLogSourceType) (*gorm.DB, string, error) {
+	db := c.db.WithContext(ctx).Model(&types.MCPAuditLog{}).Where("source_type IN ?", sources)
+	db = applySharedAuditLogFilters(db, opts)
+	if opts.Query != "" {
+		var err error
+		if db, err = c.applyAuditLogSearch(ctx, db, opts.Query); err != nil {
+			return nil, "", err
+		}
+	}
+
+	eventTime := auditLogEventTimeExpression(sources)
+	if !opts.StartTime.IsZero() {
+		db = db.Where(eventTime+" >= ?", opts.StartTime.UTC())
+	}
+	if !opts.EndTime.IsZero() {
+		db = db.Where(eventTime+" < ?", opts.EndTime.UTC())
+	}
+	if opts.ProcessingTimeMin > 0 {
+		db = db.Where("CASE WHEN source_type = ? THEN duration_ms ELSE processing_time_ms END >= ?",
+			types2.AuditLogSourceTypeLocalAgentToolCall, opts.ProcessingTimeMin)
+	}
+	if opts.ProcessingTimeMax > 0 {
+		db = db.Where("CASE WHEN source_type = ? THEN duration_ms ELSE processing_time_ms END <= ?",
+			types2.AuditLogSourceTypeLocalAgentToolCall, opts.ProcessingTimeMax)
+	}
+	return db, eventTime, nil
 }
 
 // ValidateAuditLogOptions verifies source selection, source-specific filter compatibility, and sort
@@ -354,7 +356,8 @@ func ValidateAuditLogOptions(opts MCPAuditLogOptions, sources []types2.AuditLogS
 	if opts.SortOrder != "" && opts.SortOrder != "asc" && opts.SortOrder != "desc" {
 		return fmt.Errorf("invalid audit log sort direction %q", opts.SortOrder)
 	}
-	_, err := auditLogSortExpression(opts, sources)
+	eventTime := auditLogEventTimeExpression(sources)
+	_, err := auditLogSortExpression(opts, sources, eventTime)
 	return err
 }
 
@@ -366,6 +369,22 @@ func hasMCPAuditLogFilters(opts MCPAuditLogOptions) bool {
 
 func hasLocalAgentAuditLogFilters(opts MCPAuditLogOptions) bool {
 	return len(opts.AgentProvider) > 0 || len(opts.Status) > 0 || len(opts.ToolName) > 0 || len(opts.ToolKind) > 0 || len(opts.DeviceID) > 0
+}
+
+func applySharedAuditLogFilters(db *gorm.DB, opts MCPAuditLogOptions) *gorm.DB {
+	if len(opts.APIKeyID) > 0 {
+		db = db.Where("api_key_id IN ?", opts.APIKeyID)
+	}
+	if len(opts.UserID) > 0 {
+		db = db.Where("user_id IN ?", opts.UserID)
+	}
+	if len(opts.SessionID) > 0 {
+		db = db.Where("session_id IN ?", opts.SessionID)
+	}
+	if len(opts.ClientIP) > 0 {
+		db = db.Where("client_ip IN ?", opts.ClientIP)
+	}
+	return db
 }
 
 func applyMCPAuditLogFilters(db *gorm.DB, opts MCPAuditLogOptions) *gorm.DB {
@@ -535,10 +554,10 @@ func (c *Client) applyAuditLogSearch(ctx context.Context, db *gorm.DB, queryValu
 	return db.Where("("+strings.Join(parts, " OR ")+")", args...), nil
 }
 
-func auditLogSortExpression(opts MCPAuditLogOptions, sources []types2.AuditLogSourceType) (string, error) {
+func auditLogSortExpression(opts MCPAuditLogOptions, sources []types2.AuditLogSourceType, eventTime string) (string, error) {
 	sortBy := opts.SortBy
 	if sortBy == "" || sortBy == "timestamp" {
-		return auditLogEventTimeExpression(sources), nil
+		return eventTime, nil
 	}
 	switch sortBy {
 	case "event_type":
@@ -707,28 +726,9 @@ func (c *Client) getUnifiedAuditLogFilterOptions(ctx context.Context, option str
 	expr := auditLogUnifiedFilterOptionExpr[option]
 	sources := auditlog.NormalizeSourceTypes(opts.SourceTypes)
 
-	db := c.db.WithContext(ctx).Model(&types.MCPAuditLog{}).Where("source_type IN ?", sources)
-	if opts.Query != "" {
-		var err error
-		if db, err = c.applyAuditLogSearch(ctx, db, opts.Query); err != nil {
-			return nil, err
-		}
-	}
-
-	eventTime := auditLogEventTimeExpression(sources)
-	if !opts.StartTime.IsZero() {
-		db = db.Where(eventTime+" >= ?", opts.StartTime.UTC())
-	}
-	if !opts.EndTime.IsZero() {
-		db = db.Where(eventTime+" < ?", opts.EndTime.UTC())
-	}
-	if opts.ProcessingTimeMin > 0 {
-		db = db.Where("CASE WHEN source_type = ? THEN duration_ms ELSE processing_time_ms END >= ?",
-			types2.AuditLogSourceTypeLocalAgentToolCall, opts.ProcessingTimeMin)
-	}
-	if opts.ProcessingTimeMax > 0 {
-		db = db.Where("CASE WHEN source_type = ? THEN duration_ms ELSE processing_time_ms END <= ?",
-			types2.AuditLogSourceTypeLocalAgentToolCall, opts.ProcessingTimeMax)
+	db, _, err := c.auditLogBaseQuery(ctx, opts, sources)
+	if err != nil {
+		return nil, err
 	}
 
 	// Authorized scope (role-based own-server / workspace, and embedded-view server props). Reusing
@@ -779,9 +779,7 @@ func (c *Client) GetAuditLogFilterOptions(ctx context.Context, option string, op
 	db := c.db.WithContext(ctx).Model(&types.MCPAuditLog{}).Where("source_type = ?", types2.AuditLogSourceTypeMCP).Distinct(option)
 
 	// Apply the same filters as GetMCPAuditLogs (excluding sorting, offset)
-	if len(opts.UserID) > 0 {
-		db = db.Where("user_id IN (?)", opts.UserID)
-	}
+	db = applySharedAuditLogFilters(db, opts)
 	if len(opts.MCPID) > 0 {
 		db = db.Where("mcp_id IN (?)", opts.MCPID)
 	}
@@ -797,9 +795,6 @@ func (c *Client) GetAuditLogFilterOptions(ctx context.Context, option string, op
 	if len(opts.CallIdentifier) > 0 {
 		db = db.Where("call_identifier IN (?)", opts.CallIdentifier)
 	}
-	if len(opts.SessionID) > 0 {
-		db = db.Where("session_id IN (?)", opts.SessionID)
-	}
 	if len(opts.ClientName) > 0 {
 		db = db.Where("client_name IN (?)", opts.ClientName)
 	}
@@ -808,9 +803,6 @@ func (c *Client) GetAuditLogFilterOptions(ctx context.Context, option string, op
 	}
 	if len(opts.ResponseStatus) > 0 {
 		db = db.Where("response_status IN (?)", opts.ResponseStatus)
-	}
-	if len(opts.ClientIP) > 0 {
-		db = db.Where("client_ip IN (?)", opts.ClientIP)
 	}
 	// Apply scope filtering (union of workspace servers OR own servers)
 	if len(opts.PowerUserWorkspaceID) > 0 || len(opts.OwnServerMCPIDs) > 0 {
@@ -861,15 +853,7 @@ func isLocalAgentFilterOption(option string) bool {
 func (c *Client) getMixedAuditLogFilterOptions(ctx context.Context, option string, opts MCPAuditLogOptions, exclude ...any) ([]string, error) {
 	db := c.db.WithContext(ctx).Model(&types.MCPAuditLog{}).
 		Where("source_type IN ?", auditlog.NormalizeSourceTypes(opts.SourceTypes)).Distinct(option)
-	if len(opts.UserID) > 0 {
-		db = db.Where("user_id IN ?", opts.UserID)
-	}
-	if len(opts.SessionID) > 0 {
-		db = db.Where("session_id IN ?", opts.SessionID)
-	}
-	if len(opts.ClientIP) > 0 {
-		db = db.Where("client_ip IN ?", opts.ClientIP)
-	}
+	db = applySharedAuditLogFilters(db, opts)
 	if !opts.StartTime.IsZero() {
 		db = db.Where("((source_type = ? AND created_at >= ?) OR (source_type = ? AND occurred_at >= ?))",
 			types2.AuditLogSourceTypeMCP, opts.StartTime.UTC(), types2.AuditLogSourceTypeLocalAgentToolCall, opts.StartTime.UTC())
@@ -896,15 +880,7 @@ func (c *Client) getLocalAgentAuditLogFilterOptions(ctx context.Context, option 
 	}
 	db := c.db.WithContext(ctx).Model(&types.MCPAuditLog{}).Where("source_type = ?", types2.AuditLogSourceTypeLocalAgentToolCall).Distinct(column)
 
-	if len(opts.UserID) > 0 {
-		db = db.Where("user_id IN ?", opts.UserID)
-	}
-	if len(opts.ClientIP) > 0 {
-		db = db.Where("client_ip IN ?", opts.ClientIP)
-	}
-	if len(opts.SessionID) > 0 {
-		db = db.Where("session_id IN ?", opts.SessionID)
-	}
+	db = applySharedAuditLogFilters(db, opts)
 	if len(opts.AgentProvider) > 0 {
 		db = db.Where("agent_provider IN ?", opts.AgentProvider)
 	}
@@ -1094,7 +1070,8 @@ type MCPAuditLogOptions struct {
 	// are present, a row may match either scope.
 	PowerUserWorkspaceID []string
 	OwnServerMCPIDs      []string
-	// UserID, SessionID, and ClientIP are common filters shared by both sources.
+	// APIKeyID, UserID, SessionID, and ClientIP are common filters shared by both sources.
+	APIKeyID  []uint
 	UserID    []string
 	SessionID []string
 	ClientIP  []string

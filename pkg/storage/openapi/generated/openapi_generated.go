@@ -33,6 +33,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.AppK8sSettings":                            schema_obot_platform_obot_apiclient_types_AppK8sSettings(ref),
 		"github.com/obot-platform/obot/apiclient/types.AppNotification":                           schema_obot_platform_obot_apiclient_types_AppNotification(ref),
 		"github.com/obot-platform/obot/apiclient/types.AppPreferences":                            schema_obot_platform_obot_apiclient_types_AppPreferences(ref),
+		"github.com/obot-platform/obot/apiclient/types.AuditLogAPIKeyFilterOption":                schema_obot_platform_obot_apiclient_types_AuditLogAPIKeyFilterOption(ref),
 		"github.com/obot-platform/obot/apiclient/types.AuditLogAction":                            schema_obot_platform_obot_apiclient_types_AuditLogAction(ref),
 		"github.com/obot-platform/obot/apiclient/types.AuditLogActor":                             schema_obot_platform_obot_apiclient_types_AuditLogActor(ref),
 		"github.com/obot-platform/obot/apiclient/types.AuditLogAgentDetails":                      schema_obot_platform_obot_apiclient_types_AuditLogAgentDetails(ref),
@@ -1238,6 +1239,62 @@ func schema_obot_platform_obot_apiclient_types_AppPreferences(ref common.Referen
 	}
 }
 
+func schema_obot_platform_obot_apiclient_types_AuditLogAPIKeyFilterOption(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AuditLogAPIKeyFilterOption describes an API key that appears in the currently visible audit-log result set. Value is the stable filter value; the remaining fields are non-secret display context.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"maskedKey": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"userID": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"userDisplayName": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"revoked": {
+						SchemaProps: spec.SchemaProps{
+							Default: false,
+							Type:    []string{"boolean"},
+							Format:  "",
+						},
+					},
+				},
+				Required: []string{"value", "name", "maskedKey", "userID", "userDisplayName", "revoked"},
+			},
+		},
+	}
+}
+
 func schema_obot_platform_obot_apiclient_types_AuditLogAction(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1903,6 +1960,20 @@ func schema_obot_platform_obot_apiclient_types_AuditLogExportFilters(ref common.
 									SchemaProps: spec.SchemaProps{
 										Type:   []string{"string"},
 										Format: "",
+									},
+								},
+							},
+						},
+					},
+					"apiKeyIDs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIKeyIDs matches API keys used to make requests.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"integer"},
+										Format: "int32",
 									},
 								},
 							},
@@ -8694,6 +8765,19 @@ func schema_obot_platform_obot_apiclient_types_LLMAuditLogExportFilters(ref comm
 				Description: "LLMAuditLogExportFilters represents filters for LLM audit log export",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"apiKeyIDs": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"integer"},
+										Format: "int32",
+									},
+								},
+							},
+						},
+					},
 					"userIDs": {
 						SchemaProps: spec.SchemaProps{
 							Type: []string{"array"},

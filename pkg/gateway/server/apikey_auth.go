@@ -18,8 +18,6 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const apiKeyAuthPrefix = "ok1-"
-
 // APIKeyAuthenticator authenticates requests using API keys.
 // API key users have restricted access - they only get GroupAPIKey,
 // not the full authenticated user groups.
@@ -163,8 +161,8 @@ func (a *APIKeyAuthenticator) AuthenticateRequest(req *http.Request) (*authentic
 		}
 	}
 
-	// Check if this is an API key (starts with ok1-)
-	if !strings.HasPrefix(authHeader, apiKeyAuthPrefix) {
+	// Check if this value uses the shared API key prefix.
+	if !strings.HasPrefix(authHeader, system.APIKeyPrefix+"-") {
 		return nil, false, nil
 	}
 

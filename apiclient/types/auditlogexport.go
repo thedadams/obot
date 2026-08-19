@@ -118,6 +118,8 @@ type AuditLogExportFilters struct {
 	Outcomes []string `json:"outcomes,omitempty"`
 	// Clients is the MCP client name or local-agent provider.
 	Clients []string `json:"clients,omitempty"`
+	// APIKeyIDs matches API keys used to make requests.
+	APIKeyIDs []uint `json:"apiKeyIDs,omitempty"`
 
 	// Single-source filters.
 	UserIDs                    []string `json:"userIDs,omitempty"`
@@ -144,6 +146,7 @@ type AuditLogExportFilters struct {
 
 // LLMAuditLogExportFilters represents filters for LLM audit log export
 type LLMAuditLogExportFilters struct {
+	APIKeyIDs              []uint   `json:"apiKeyIDs,omitempty"`
 	UserIDs                []string `json:"userIDs,omitempty"`
 	ModelProviders         []string `json:"modelProviders,omitempty"`
 	TargetModels           []string `json:"targetModels,omitempty"`

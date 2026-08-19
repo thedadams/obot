@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { toAuditLogFilterSelectOption, toStringFilterSelectOptions } from '$lib/auditlogs';
 	import Select from '$lib/components/Select.svelte';
 	import {
 		ALL_SOURCE_TYPES,
@@ -15,6 +16,7 @@
 	import Loading from '$lib/icons/Loading.svelte';
 	import {
 		type LLMAuditLogURLFilters,
+		type AuditLogFilterOption,
 		type OrgUser,
 		type ScheduledAuditLogExport,
 		AdminService,
@@ -62,6 +64,7 @@
 		retentionPeriodInDays: 30,
 		sourceTypes: [...ALL_SOURCE_TYPES] as string[],
 		filters: {
+			api_key_id: '',
 			actor: '',
 			operation: '',
 			mcp_server: '',
@@ -127,6 +130,7 @@
 			if (logType === 'llm' && initialData.llmFilters) {
 				const filters = initialData.llmFilters;
 				form.filters = {
+					api_key_id: filters.apiKeyIDs?.join(',') ?? '',
 					user_id: filters.userIDs ? filters.userIDs.join(',') : '',
 					model_provider: filters.modelProviders ? filters.modelProviders.join(',') : '',
 					target_model: filters.targetModels ? filters.targetModels.join(',') : '',
@@ -145,6 +149,7 @@
 			if (initialData.filters) {
 				const filters = initialData.filters;
 				form.filters = {
+					api_key_id: filters.apiKeyIDs?.join(',') ?? '',
 					actor: filters.actors?.join(',') ?? '',
 					operation: filters.operations?.join(',') ?? '',
 					mcp_server: filters.mcpServers?.join(',') ?? '',
@@ -190,6 +195,7 @@
 			const mappedField =
 				logType === 'llm'
 					? ({
+							api_key_id: 'api_key_id',
 							user_id: 'user_id',
 							user_agent: 'user_agent',
 							client_session_id: 'client_session_id',
@@ -202,6 +208,7 @@
 							query: 'query'
 						} satisfies Record<string, keyof LLMAuditLogURLFilters>)
 					: ({
+							api_key_id: 'api_key_id',
 							actor: 'actor',
 							operation: 'operation',
 							mcp_server: 'mcp_server',
@@ -250,6 +257,7 @@
 		'tool',
 		'outcome',
 		'client',
+		'api_key_id',
 		'mcp_id',
 		'user_id',
 		'mcp_server_catalog_entry_name',
@@ -268,6 +276,7 @@
 		'device_id'
 	];
 	let llmFiltersIds = [
+		'api_key_id',
 		'user_id',
 		'user_agent',
 		'client_session_id',
@@ -281,7 +290,7 @@
 	let filtersIds = $derived(logType === 'llm' ? llmFiltersIds : mcpFiltersIds);
 
 	let usersMap = new SvelteMap<string, OrgUser>();
-	let filtersOptions: Record<string, string[]> = $state({});
+	let filtersOptions: Record<string, AuditLogFilterOption[]> = $state({});
 
 	$effect(() => {
 		UserService.listUsers().then((res) => {
@@ -320,6 +329,7 @@
 	type AuditScheduleAdvancedFilterRow = {
 		fieldId: string;
 		filterKey:
+			| 'api_key_id'
 			| 'actor'
 			| 'operation'
 			| 'mcp_server'
@@ -352,19 +362,23 @@
 	};
 
 	let auditScheduleAdvancedFilterRows = $derived.by((): AuditScheduleAdvancedFilterRow[] => {
-		const sameLabel = (d: string) => ({ id: d, label: d });
+		const sameLabel = (d: AuditLogFilterOption) => toAuditLogFilterSelectOption(d);
+		const getUserDisplayName = (id: string) => usersMap.get(id)?.displayName ?? id;
 		if (logType === 'llm') {
 			return [
+				{
+					fieldId: 'api_key_id',
+					filterKey: 'api_key_id',
+					label: 'API Keys',
+					description: 'API keys used for the requests',
+					options: filtersOptions['api_key_id']?.map?.(sameLabel) ?? []
+				},
 				{
 					fieldId: 'user_id',
 					filterKey: 'user_id',
 					label: 'Users',
 					description: 'Comma-separated user IDs',
-					options:
-						filtersOptions['user_id']?.map?.((d) => ({
-							id: d,
-							label: usersMap.get(d)?.displayName ?? d
-						})) ?? []
+					options: toStringFilterSelectOptions(filtersOptions['user_id'], getUserDisplayName)
 				},
 				{
 					fieldId: 'model_provider',
@@ -420,11 +434,10 @@
 					filterKey: 'message_policy_triggered',
 					label: 'Message Policy Action',
 					description: 'Filter by whether a message policy was triggered',
-					options:
-						filtersOptions['message_policy_triggered']?.map?.((value) => ({
-							id: value,
-							label: value === 'true' ? 'Triggered' : 'Not triggered'
-						})) ?? []
+					options: toStringFilterSelectOptions(
+						filtersOptions['message_policy_triggered'],
+						(value) => (value === 'true' ? 'Triggered' : 'Not triggered')
+					)
 				}
 			];
 		}
@@ -436,11 +449,7 @@
 				filterKey: 'actor',
 				label: 'Actors',
 				description: 'Users and enrolled devices',
-				options:
-					filtersOptions['actor']?.map?.((d) => ({
-						id: d,
-						label: usersMap.get(d)?.displayName ?? d
-					})) ?? []
+				options: toStringFilterSelectOptions(filtersOptions['actor'], getUserDisplayName)
 			},
 			{
 				fieldId: 'tool',
@@ -476,6 +485,14 @@
 				label: 'Clients',
 				description: 'MCP clients and local-agent providers',
 				options: filtersOptions['client']?.map?.(sameLabel) ?? []
+			},
+			// API-key attribution is shared by every audit-log source.
+			{
+				fieldId: 'api_key_id',
+				filterKey: 'api_key_id',
+				label: 'API Keys',
+				description: 'API keys used for the requests',
+				options: filtersOptions['api_key_id']?.map?.(sameLabel) ?? []
 			},
 			// Single-source filters. Shown only when exactly one log source is selected.
 			{
@@ -518,11 +535,7 @@
 				filterKey: 'user_id',
 				label: 'User IDs',
 				description: 'Comma-separated user IDs',
-				options:
-					filtersOptions['user_id']?.map?.((d) => ({
-						id: d,
-						label: usersMap.get(d)?.displayName ?? d
-					})) ?? []
+				options: toStringFilterSelectOptions(filtersOptions['user_id'], getUserDisplayName)
 			},
 			{
 				fieldId: 'mcp_id',
@@ -622,6 +635,7 @@
 					schedule: form.schedule,
 					retentionPeriodInDays: form.retentionPeriodInDays,
 					llmFilters: {
+						apiKeyIDs: splitNumbers(form.filters.api_key_id),
 						userIDs: split(form.filters.user_id),
 						modelProviders: split(form.filters.model_provider),
 						targetModels: split(form.filters.target_model),
@@ -663,6 +677,7 @@
 				schedule: form.schedule,
 				retentionPeriodInDays: form.retentionPeriodInDays,
 				filters: {
+					apiKeyIDs: splitNumbers(form.filters.api_key_id),
 					sourceTypes: normalizeSourceTypes(form.sourceTypes),
 					actors: split(form.filters.actor),
 					operations: split(form.filters.operation),
