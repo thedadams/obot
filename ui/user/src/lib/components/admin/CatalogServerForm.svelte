@@ -992,6 +992,7 @@
 				variant="server"
 				{readonly}
 				{showRequired}
+				{showInvalid}
 				onFieldChange={updateRequired}
 				isNewEntry={!entry}
 				{onConfigureOAuth}
@@ -1006,6 +1007,7 @@
 							serverUserType={formData.serverUserType}
 							{secretBoundHeaders}
 							showRequired={showRequired.env}
+							showInvalid={showInvalid.env}
 						/>
 					{/if}
 				{/snippet}
@@ -1017,6 +1019,7 @@
 				tunnelsLoading={canConfigureTunnels && mcpTunnels === undefined}
 				{readonly}
 				{showRequired}
+				{showInvalid}
 				onFieldChange={updateRequired}
 				isNewEntry={!entry}
 				{onConfigureOAuth}
@@ -1029,6 +1032,7 @@
 							{readonly}
 							serverUserType={formData.serverUserType}
 							showRequired={showRequired.env}
+							showInvalid={showInvalid.env}
 							urlTemplateVariables
 						/>
 					{/if}
@@ -1062,6 +1066,7 @@
 			{secretBoundHeaders}
 			secretBindingTargets={editableSecretBindingTargets}
 			showRequired={showRequired.env}
+			showInvalid={showInvalid.env}
 		/>
 	{/if}
 
