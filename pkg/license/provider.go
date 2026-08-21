@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	keygen "github.com/keygen-sh/keygen-go/v3"
 	"github.com/obot-platform/obot/pkg/gateway/client"
 	"gorm.io/gorm"
@@ -79,6 +79,15 @@ type licenseKeySnapshot struct {
 	viaConfiguration bool
 }
 
+type validationRequest struct {
+	fingerprint string
+}
+
+type keygenValidationResponse struct {
+	License keygen.License
+	Result  keygen.ValidationResult
+}
+
 func (s licenseKeySnapshot) equal(other licenseKeySnapshot) bool {
 	return s.key == other.key &&
 		s.viaConfiguration == other.viaConfiguration &&
@@ -122,10 +131,10 @@ func newProvider(ctx context.Context, gatewayClient *client.Client, config Confi
 
 func ensureMachineFingerprint(ctx context.Context, gatewayClient *client.Client) (string, error) {
 	if gatewayClient == nil {
-		return uuid.NewString(), nil
+		return uuid.New().String(), nil
 	}
 
-	property, err := gatewayClient.GetOrCreateProperty(ctx, LicenseMachineIDPropertyKey, uuid.NewString())
+	property, err := gatewayClient.GetOrCreateProperty(ctx, LicenseMachineIDPropertyKey, uuid.New().String())
 	if err != nil {
 		return "", fmt.Errorf("failed to ensure license machine ID: %w", err)
 	}
@@ -242,10 +251,6 @@ func (p *Provider) keygenClient(licenseKey string) *keygen.Client {
 	return keygenClient
 }
 
-type validationRequest struct {
-	fingerprint string
-}
-
 func (v validationRequest) GetMeta() any {
 	return struct {
 		Scope struct {
@@ -261,11 +266,6 @@ func (v validationRequest) GetMeta() any {
 			Product:     keygenProduct,
 		},
 	}
-}
-
-type keygenValidationResponse struct {
-	License keygen.License
-	Result  keygen.ValidationResult
 }
 
 func (v *keygenValidationResponse) SetData(to func(target any) error) error {

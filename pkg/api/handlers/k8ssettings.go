@@ -19,7 +19,9 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-const appContainerName = "obot"
+const (
+	appContainerName = "obot"
+)
 
 type K8sSettingsHandler struct {
 	mcpSessionManager *mcp.SessionManager
@@ -27,6 +29,14 @@ type K8sSettingsHandler struct {
 	serviceName       string
 	serviceNamespace  string
 	localK8sClient    kclient.Client
+}
+
+// PodSchedulingYAML contains the shared pod scheduling fields returned by the API.
+type PodSchedulingYAML struct {
+	Affinity         string
+	Tolerations      string
+	Resources        string
+	RuntimeClassName string
 }
 
 func NewK8sSettingsHandler(
@@ -373,14 +383,6 @@ func convertK8sSettings(settings v1.K8sSettings) (types.K8sSettings, error) {
 	}
 
 	return result, nil
-}
-
-// PodSchedulingYAML contains the shared pod scheduling fields returned by the API.
-type PodSchedulingYAML struct {
-	Affinity         string
-	Tolerations      string
-	Resources        string
-	RuntimeClassName string
 }
 
 // FormatPodSchedulingYAML converts parsed pod scheduling fields into API YAML strings.

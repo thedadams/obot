@@ -4,22 +4,22 @@ package context
 import (
 	"context"
 	"log/slog"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
-type reqIDKey struct{}
+type (
+	reqIDKey  struct{}
+	loggerKey struct{}
+)
 
 func WithNewRequestID(ctx context.Context) context.Context {
-	return context.WithValue(ctx, reqIDKey{}, uuid.NewString())
+	return context.WithValue(ctx, reqIDKey{}, uuid.New().String())
 }
 
 func GetRequestID(ctx context.Context) string {
 	s, _ := ctx.Value(reqIDKey{}).(string)
 	return s
 }
-
-type loggerKey struct{}
 
 func WithLogger(ctx context.Context, log *slog.Logger) context.Context {
 	return context.WithValue(ctx, loggerKey{}, log)

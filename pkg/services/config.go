@@ -77,7 +77,9 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const leaderElectionRequestTimeout = 15 * time.Second
+const (
+	leaderElectionRequestTimeout = 15 * time.Second
+)
 
 type (
 	GatewayConfig     gserver.Options
@@ -284,6 +286,12 @@ type Services struct {
 	LicenseProvider *license.Provider
 }
 
+type hostedAgentPodSchedulingSettings struct {
+	Affinity     *corev1.Affinity
+	Tolerations  []corev1.Toleration
+	NodeSelector map[string]string
+}
+
 // BuildLocalK8sConfig creates a Kubernetes config for local cluster access
 func BuildLocalK8sConfig() (*rest.Config, error) {
 	cfg, err := rest.InClusterConfig()
@@ -302,12 +310,6 @@ func unmarshalJSONStrict(data []byte, v any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(v)
-}
-
-type hostedAgentPodSchedulingSettings struct {
-	Affinity     *corev1.Affinity
-	Tolerations  []corev1.Toleration
-	NodeSelector map[string]string
 }
 
 func parseHostedAgentPodSchedulingSettings(config Config) (hostedAgentPodSchedulingSettings, error) {

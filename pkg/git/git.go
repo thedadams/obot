@@ -22,9 +22,13 @@ import (
 	gitfs "github.com/go-git/go-git/v5/storage/filesystem"
 )
 
-const maxRepoSizeMB = 100
+const (
+	maxRepoSizeMB = 100
+)
 
-var errRepoTooLarge = errors.New("repository too large")
+var (
+	errRepoTooLarge = errors.New("repository too large")
+)
 
 type cloneAuthAttempt struct {
 	name  string
@@ -36,6 +40,11 @@ type cloneRefAttempt struct {
 	referenceName plumbing.ReferenceName
 	checkoutHash  string
 	depth         int
+}
+
+// githubRepoInfo represents repository information from the GitHub API.
+type githubRepoInfo struct {
+	Size int `json:"size"` // Size in KB
 }
 
 func cloneAuthAttempts(token, fallbackToken string) []cloneAuthAttempt {
@@ -325,11 +334,6 @@ func isFullCommitSHA(ref string) bool {
 
 func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-// githubRepoInfo represents repository information from the GitHub API.
-type githubRepoInfo struct {
-	Size int `json:"size"` // Size in KB
 }
 
 // checkGitHubRepoSize checks repo size via the GitHub API before cloning.

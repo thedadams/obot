@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	nanobottypes "github.com/obot-platform/nanobot/pkg/types"
 	apitypes "github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/api/server/requestinfo"
@@ -39,11 +39,17 @@ type llmAuditRecorder struct {
 	responseCaptureFilled bool
 }
 
+type llmAuditResponseBody struct {
+	body   io.ReadCloser
+	audit  *llmAuditRecorder
+	client *client.Client
+}
+
 func newLLMAuditRecorder(req *http.Request, user user.Info, responseCaptureLimit int) *llmAuditRecorder {
 	now := time.Now()
 	requestID := gatewaycontext.GetRequestID(req.Context())
 	if requestID == "" {
-		requestID = uuid.NewString()
+		requestID = uuid.New().String()
 	}
 
 	userID := ""
@@ -59,7 +65,7 @@ func newLLMAuditRecorder(req *http.Request, user user.Info, responseCaptureLimit
 	return &llmAuditRecorder{
 		responseCaptureLimit: responseCaptureLimit,
 		log: types.LLMAuditLog{
-			ID:             uuid.NewString(),
+			ID:             uuid.New().String(),
 			CreatedAt:      now,
 			UserID:         userID,
 			APIKeyID:       apiKeyID,
@@ -198,12 +204,6 @@ func (r *llmAuditRecorder) setOutcomeAndResponseStatus(err error) {
 			r.log.Outcome = types.LLMAuditOutcomeError
 		}
 	}
-}
-
-type llmAuditResponseBody struct {
-	body   io.ReadCloser
-	audit  *llmAuditRecorder
-	client *client.Client
 }
 
 func (r *llmAuditResponseBody) Read(p []byte) (int, error) {
