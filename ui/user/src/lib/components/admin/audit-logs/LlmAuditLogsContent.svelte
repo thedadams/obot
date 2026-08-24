@@ -195,13 +195,19 @@
 
 	$effect(() => {
 		const controller = new AbortController();
-		const otherFilters = { ...filters };
+		if (!filters.api_key_id) {
+			apiKeyFilterOptions = {};
+			return;
+		}
 		AdminService.listLLMAuditLogFilterOptions('api_key_id', {
-			...otherFilters,
+			...filters,
 			offset: null,
 			signal: controller.signal
 		})
-			.then((result) => rememberAPIKeyFilterOptions(result.options ?? []))
+			.then((result) => {
+				apiKeyFilterOptions = {};
+				rememberAPIKeyFilterOptions(result.options ?? []);
+			})
 			.catch((error) => {
 				if (!isAbortError(error) && !controller.signal.aborted) {
 					console.error('Failed to fetch API key filter options:', error);

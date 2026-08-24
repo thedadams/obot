@@ -1356,6 +1356,13 @@ func schema_obot_platform_obot_apiclient_types_AuditLogActor(ref common.Referenc
 							Format:      "",
 						},
 					},
+					"apiKeyRevoked": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIKeyRevoked reports the current lifecycle state of the API key represented by CredentialID, or by ID when ActorType is AuditLogActorTypeCredential.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"actorType"},
 			},
@@ -8593,6 +8600,13 @@ func schema_obot_platform_obot_apiclient_types_LLMAuditLog(ref common.ReferenceC
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"integer"},
 							Format: "int32",
+						},
+					},
+					"apiKeyRevoked": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIKeyRevoked reports the API key's current lifecycle state.",
+							Type:        []string{"boolean"},
+							Format:      "",
 						},
 					},
 					"apiKeyName": {

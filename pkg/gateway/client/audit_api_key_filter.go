@@ -11,11 +11,82 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	auditLogAPIKeyLookupBatchSize = 1000
+)
+
 type auditLogAPIKeyOptionRow struct {
 	APIKeyID   uint
 	APIKeyName string
 	UserID     uint
 	Revoked    bool
+}
+
+func (c *Client) enrichLLMAuditLogAPIKeyRevocation(ctx context.Context, logs []types.LLMAuditLog) error {
+	ids := make([]uint, 0, len(logs))
+	for _, log := range logs {
+		if log.APIKeyID != nil {
+			ids = append(ids, *log.APIKeyID)
+		}
+	}
+	revoked, err := c.revokedAPIKeyIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range logs {
+		if logs[i].APIKeyID != nil {
+			_, logs[i].APIKeyRevoked = revoked[*logs[i].APIKeyID]
+		}
+	}
+	return nil
+}
+
+func (c *Client) enrichMCPAuditLogAPIKeyRevocation(ctx context.Context, logs []types.MCPAuditLog) error {
+	ids := make([]uint, 0, len(logs))
+	for _, log := range logs {
+		if log.APIKeyID != nil {
+			ids = append(ids, *log.APIKeyID)
+		}
+	}
+	revoked, err := c.revokedAPIKeyIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range logs {
+		if logs[i].APIKeyID != nil {
+			_, logs[i].APIKeyRevoked = revoked[*logs[i].APIKeyID]
+		}
+	}
+	return nil
+}
+
+func (c *Client) revokedAPIKeyIDs(ctx context.Context, ids []uint) (map[uint]struct{}, error) {
+	unique := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		if id != 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	uniqueIDs := make([]uint, 0, len(unique))
+	for id := range unique {
+		uniqueIDs = append(uniqueIDs, id)
+	}
+
+	revoked := make(map[uint]struct{})
+	for offset := 0; offset < len(uniqueIDs); offset += auditLogAPIKeyLookupBatchSize {
+		end := min(offset+auditLogAPIKeyLookupBatchSize, len(uniqueIDs))
+		var batch []uint
+		if err := c.db.WithContext(ctx).
+			Model(&types.APIKey{}).
+			Where("id IN ? AND revoked_at IS NOT NULL", uniqueIDs[offset:end]).
+			Pluck("id", &batch).Error; err != nil {
+			return nil, err
+		}
+		for _, id := range batch {
+			revoked[id] = struct{}{}
+		}
+	}
+	return revoked, nil
 }
 
 // GetMCPAuditLogAPIKeyFilterOptions returns the API keys present in the
