@@ -21,6 +21,7 @@ import (
 	"github.com/obot-platform/nah/pkg/router"
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/api/handlers/providers"
+	"github.com/obot-platform/obot/pkg/auth"
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
 	"github.com/obot-platform/obot/pkg/gateway/server/dispatcher"
 	gatewaytypes "github.com/obot-platform/obot/pkg/gateway/types"
@@ -209,6 +210,10 @@ func appendProviders(registryPath string, authProviderManifests []providerFromFi
 			slog.Warn("Skipping auth provider with missing required fields", "name", a.Name, "command", a.Manifest.Command)
 			continue
 		}
+		if err := auth.ValidateGroupIDPrefix(a.Manifest.GroupIDPrefix); err != nil {
+			slog.Warn("Skipping auth provider with invalid group ID prefix", "name", a.Name, "groupIDPrefix", a.Manifest.GroupIDPrefix, "error", err)
+			continue
+		}
 
 		a.Manifest.Command = path.Join(registryPath, a.Manifest.Command)
 
@@ -221,6 +226,23 @@ func appendProviders(registryPath string, authProviderManifests []providerFromFi
 	}
 
 	return objs
+}
+
+func validateUniqueAuthProviderGroupIDPrefixes(objs []kclient.Object) error {
+	providersByPrefix := make(map[string]string)
+	for _, obj := range objs {
+		provider, ok := obj.(*v1.AuthProvider)
+		if !ok || provider.Spec.GroupIDPrefix == "" {
+			continue
+		}
+
+		prefix := strings.ToLower(provider.Spec.GroupIDPrefix)
+		if existingProvider, ok := providersByPrefix[prefix]; ok {
+			return fmt.Errorf("auth providers %q and %q declare the same group ID prefix %q", existingProvider, provider.Name, provider.Spec.GroupIDPrefix)
+		}
+		providersByPrefix[prefix] = provider.Name
+	}
+	return nil
 }
 
 func (h *Handler) ReadFromRegistry(ctx context.Context, c kclient.Client) error {
@@ -248,6 +270,9 @@ func (h *Handler) ReadFromRegistry(ctx context.Context, c kclient.Client) error 
 		// Do not accidentally delete all the providers.
 		slog.Info("Skipping provider registry apply because no providers were resolved")
 		return nil
+	}
+	if err := validateUniqueAuthProviderGroupIDPrefixes(toAdd); err != nil {
+		return fmt.Errorf("validate provider registries: %w", err)
 	}
 
 	slog.Info("Applying resolved providers from registries", "providers", len(toAdd))
