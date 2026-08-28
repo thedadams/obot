@@ -27,6 +27,8 @@ type Client struct {
 }
 
 type ClientOption struct {
+	// OAuthClientName overrides ClientName only for dynamic client registration.
+	OAuthClientName string
 	ClientName      string
 	ClientVersion   string
 	TokenStorage    TokenStorage
@@ -163,7 +165,11 @@ func (sm *SessionManager) loadSession(ctx context.Context, server ServerConfig, 
 
 	var oauthHandler auth.OAuthHandler = authorizationErrorOAuthHandler{}
 	if clientOpts.TokenStorage != nil {
-		oauthHandler = newOAuth(httpClient, clientOpts.CallbackHandler, clientOpts.ClientLookup, clientOpts.TokenStorage, server.MCPServerName, clientOpts.ClientName, sm.baseURL+"/oauth/mcp/callback", system.OAuthClientIDMetadataURL(sm.baseURL))
+		oauthClientName := clientOpts.OAuthClientName
+		if oauthClientName == "" {
+			oauthClientName = clientOpts.ClientName
+		}
+		oauthHandler = newOAuth(httpClient, clientOpts.CallbackHandler, clientOpts.ClientLookup, clientOpts.TokenStorage, server.MCPServerName, oauthClientName, sm.baseURL+"/oauth/mcp/callback", system.OAuthClientIDMetadataURL(sm.baseURL))
 	}
 
 	session, err := c.Connect(ctx, &gomcp.StreamableClientTransport{
