@@ -4,14 +4,16 @@
 	import Layout from '$lib/components/Layout.svelte';
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
 	import SensitiveInput from '$lib/components/SensitiveInput.svelte';
+	import CommunitySignUpForm from '$lib/components/admin/license/CommunitySignUpForm.svelte';
 	import UserLimitNotice from '$lib/components/admin/license/UserLimitNotice.svelte';
+	import BetaLogo from '$lib/components/navbar/BetaLogo.svelte';
 	import {
 		COMMUNITY_ENTITLEMENT,
+		COMMUNITY_SIGNUP_BANNER_COPY,
 		ENTERPRISE_ENTITLEMENT,
 		MODEL_PROVIDERS_ENTITLEMENT
 	} from '$lib/constants';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants.js';
-	import { parseErrorContent } from '$lib/errors';
 	import { reloadPage } from '$lib/navigation';
 	import { AdminService } from '$lib/services';
 	import { errors, license as licenseStore, profile, version } from '$lib/stores';
@@ -36,28 +38,22 @@
 	let updateLicenseKey = $state('');
 	let updating = $state(false);
 	let updateError = $state('');
-	let updateLicenseTitle = $derived(license?.licenseKey ? 'Update License Key' : 'Add License Key');
-	let isAdminReadonly = $derived(profile.current.isAdminReadonly?.());
-	let hasValidLicense = $derived(Boolean(license?.enterprise));
 	let isCommunityEdition = $derived(
 		license?.entitlements?.includes(COMMUNITY_ENTITLEMENT) ?? false
 	);
+	let updateLicenseTitle = $derived(
+		license?.licenseKey && !isCommunityEdition ? 'Update License Key' : 'Add License Key'
+	);
+	let isAdminReadonly = $derived(profile.current.isAdminReadonly?.());
+	let hasValidLicense = $derived(Boolean(license?.enterprise));
 	let visibleEntitlements = $derived(
 		[...(license?.entitlements ?? [])]
 			.filter((entitlement) => entitlement !== MODEL_PROVIDERS_ENTITLEMENT)
 			.sort((a, b) => Number(!editionEntitlements.has(a)) - Number(!editionEntitlements.has(b)))
 	);
-	let showEnterpriseCTA = $derived(isCommunityEdition);
-	let showCommunityEnrollment = $derived(
-		Boolean(license && !hasValidLicense && !license.locked && !isAdminReadonly)
-	);
+	let showEnterpriseCTA = $derived(!hasValidLicense || isCommunityEdition);
 	let showUserLimitNotice = $derived(validateVersionUserLimit(version.current));
 
-	let communityName = $state('');
-	let communityEmail = $state('');
-	let communityCompany = $state('');
-	let communitySaving = $state(false);
-	let communityError = $state('');
 	let manualCheckAvailableAt = $derived(
 		license?.manualCheckAvailableAt ? new Date(license.manualCheckAvailableAt).getTime() : 0
 	);
@@ -118,30 +114,6 @@
 			errors.append(`Failed to recheck license: ${err}`);
 		} finally {
 			rechecking = false;
-		}
-	}
-
-	async function handleCommunitySubmit(event: SubmitEvent) {
-		event.preventDefault();
-		if (communitySaving) return;
-
-		communitySaving = true;
-		communityError = '';
-		try {
-			await AdminService.createCommunityLicense(
-				{
-					name: communityName.trim(),
-					email: communityEmail.trim(),
-					company: communityCompany.trim() || undefined
-				},
-				{ dontLogErrors: true }
-			);
-			reloadPage();
-		} catch (err) {
-			communityError =
-				parseErrorContent(err).message || 'Failed to obtain an Obot Community license.';
-		} finally {
-			communitySaving = false;
 		}
 	}
 
@@ -262,79 +234,10 @@
 				</div>
 			{/if}
 
-			{#if showCommunityEnrollment}
-				<form class="paper flex flex-col gap-4" onsubmit={handleCommunitySubmit}>
-					<div class="flex flex-col gap-1">
-						<h2 class="text-xl font-semibold">Upgrade to Obot Community</h2>
-						<p class="text-muted-content text-sm font-light">
-							Get permanent, free access to Obot Community and additional authentication providers,
-							including Entra, Okta, JumpCloud, and Auth0, with a one-time registration.
-						</p>
-					</div>
-
-					<div class="grid gap-4 md:grid-cols-2">
-						<label class="flex flex-col gap-1 text-sm font-light" for="community-name">
-							Name
-							<input
-								id="community-name"
-								class="text-input-filled"
-								name="name"
-								type="text"
-								autocomplete="name"
-								bind:value={communityName}
-								required
-							/>
-						</label>
-
-						<label class="flex flex-col gap-1 text-sm font-light" for="community-email">
-							Email
-							<input
-								id="community-email"
-								class="text-input-filled"
-								name="email"
-								type="email"
-								pattern="[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+"
-								title="Enter an email address with a valid domain, such as name@example.com."
-								autocomplete="email"
-								bind:value={communityEmail}
-								required
-							/>
-						</label>
-
-						<label
-							class="flex flex-col gap-1 text-sm font-light md:col-span-2"
-							for="community-company"
-						>
-							Company <span class="text-muted-content text-xs">(optional)</span>
-							<input
-								id="community-company"
-								class="text-input-filled"
-								name="company"
-								type="text"
-								autocomplete="organization"
-								bind:value={communityCompany}
-							/>
-						</label>
-					</div>
-
-					{#if communityError}
-						<div in:slide={{ duration: 150, axis: 'y' }} class="alert alert-error alert-soft">
-							{communityError}
-						</div>
-					{/if}
-
-					<button class="btn btn-primary w-full sm:w-fit" type="submit" disabled={communitySaving}>
-						{#if communitySaving}
-							<LoaderCircle class="size-4 animate-spin" />
-						{/if}
-						{communitySaving ? 'Upgrading to Community Edition...' : 'Upgrade to Obot Community'}
-					</button>
-				</form>
-			{/if}
 			<section class="paper flex flex-col @2xl:flex-row gap-6 items-start justify-between">
 				<div class="flex flex-col gap-6">
 					{#if license}
-						{#if license.licenseKey}
+						{#if license.licenseKey && !isCommunityEdition}
 							<div class="flex flex-col gap-1">
 								<div class="text-sm font-light">License Key</div>
 								<div class="font-mono text-sm text-muted-content">
@@ -348,15 +251,15 @@
 								<p
 									class={twMerge(
 										'text-sm',
-										license.licenseKey && 'uppercase font-medium',
-										license.licenseKey
+										license.licenseKey && !isCommunityEdition && 'uppercase font-medium',
+										license.licenseKey && !isCommunityEdition
 											? license.enterprise
 												? 'text-success'
 												: 'text-error'
 											: 'text-muted-content'
 									)}
 								>
-									{#if license.licenseKey}
+									{#if license.licenseKey && !isCommunityEdition}
 										{license.enterprise ? 'Active' : 'Invalid'}
 									{:else}
 										N/A <span class="text-xs font-light">(Open-Source)</span>
@@ -365,7 +268,7 @@
 							</div>
 						</div>
 						<div class="flex flex-col gap-1">
-							<p class="text-sm font-light">License Entitlements</p>
+							<p class="text-sm font-light">Entitlements</p>
 							{#if license.entitlements}
 								<ul class="flex flex-wrap gap-2">
 									{#each visibleEntitlements as entitlement (entitlement)}
@@ -386,7 +289,7 @@
 					{/if}
 				</div>
 				<div class="flex w-full flex-col gap-2 @2xl:w-fit @2xl:flex-row">
-					{#if license.licenseKey}
+					{#if license.licenseKey && !isCommunityEdition}
 						<button
 							class="btn btn-secondary w-full sm:w-fit"
 							onclick={handleRecheckLicense}
@@ -442,7 +345,7 @@
 				</section>
 			{/if}
 
-			{#if license && license.licenseKey}
+			{#if license && license.licenseKey && !isCommunityEdition}
 				<section class="paper gap-0">
 					<h4 class="font-semibold text-xl">Danger Zone</h4>
 					<p class="text-sm font-light">
@@ -473,6 +376,45 @@
 						</div>
 					</div>
 				</section>
+			{:else if !isCommunityEdition}
+				<aside
+					class="relative overflow-hidden rounded-box border border-primary/20 bg-base-100 dark:bg-base-200 shadow-sm md:max-w-md mx-auto"
+					aria-labelledby="community-cta-heading"
+				>
+					<div class="pointer-events-none absolute inset-0" aria-hidden="true">
+						<div
+							class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-primary/5"
+						></div>
+						<div
+							class="absolute -top-12 -left-8 size-40 rounded-full border border-primary/15"
+						></div>
+						<div
+							class="absolute -top-6 -left-2 size-24 rounded-full border border-primary/10"
+						></div>
+						<div class="absolute -right-16 -bottom-20 size-52 rounded-full bg-primary/5"></div>
+						<div
+							class="absolute inset-y-0 left-0 w-1/4 bg-linear-to-r from-primary/10 to-transparent"
+						></div>
+					</div>
+
+					<div class="relative flex flex-col gap-4 p-4 sm:p-6">
+						<BetaLogo class="mx-auto" />
+						<p class="max-w-md text-sm font-light">
+							{COMMUNITY_SIGNUP_BANNER_COPY}
+						</p>
+						<div
+							class="rounded-xl border border-base-300/80 bg-base-100/80 p-4 shadow-sm backdrop-blur-sm"
+						>
+							<CommunitySignUpForm
+								endpoint={AdminService.createCommunityLicense}
+								onSubmit={reloadPage}
+								showHeader={false}
+								idPrefix="license-community"
+								disabled={isAdminReadonly}
+							/>
+						</div>
+					</div>
+				</aside>
 			{/if}
 		</div>
 	</div>

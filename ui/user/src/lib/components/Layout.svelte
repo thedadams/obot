@@ -53,8 +53,12 @@
 	import { page } from '$app/state';
 	import { columnResize } from '$lib/actions/resize';
 	import Navbar from '$lib/components/Navbar.svelte';
-	import { COMMUNITY_ENTITLEMENT } from '$lib/constants';
-	import { ADMIN_AGENT_DISABLED_MESSAGE, USER_AGENT_DISABLED_MESSAGE } from '$lib/constants';
+	import {
+		ADMIN_AGENT_DISABLED_MESSAGE,
+		COMMUNITY_ENTITLEMENT,
+		ENTERPRISE_ENTITLEMENT,
+		USER_AGENT_DISABLED_MESSAGE
+	} from '$lib/constants';
 	import {
 		initLayout as defaultInitLayout,
 		getLayout as defaultGetLayout,
@@ -66,6 +70,7 @@
 	import {
 		accessibleModels,
 		defaultModelAliases,
+		license as licenseStore,
 		profile,
 		responsive,
 		version,
@@ -75,8 +80,8 @@
 	import { isAgentEnabled, validateVersionUserLimit } from '$lib/utils';
 	import AppNotificationBanner from './AppNotificationBanner.svelte';
 	import InfoTooltip from './InfoTooltip.svelte';
-	import ConfigureBanner from './admin/ConfigureBanner.svelte';
 	import SetupSplashDialog from './admin/SetupSplashDialog.svelte';
+	import CommunitySignupBanner from './admin/license/CommunitySignupBanner.svelte';
 	import LicenseViolationBanner from './admin/license/LicenseViolationBanner.svelte';
 	import GuidePanel from './guides/GuidePanel.svelte';
 	import Guide from './guides/Guides.svelte';
@@ -693,10 +698,8 @@
 		betaRoutes.some((href) => pathname === href || pathname.startsWith(`${href}/`))
 	);
 	let logoVariant = $derived.by(() => {
-		if (version.current.licenseEntitlements?.includes(COMMUNITY_ENTITLEMENT))
-			return 'community' as const;
 		if (version.current.enterprise) return 'enterprise' as const;
-		return 'default' as const;
+		return 'community' as const;
 	});
 	$effect(() => {
 		if (responsive.isMobile) {
@@ -728,11 +731,6 @@
 
 	const isAdminRoute = $derived(pathname.includes('/admin'));
 	const isAgentRoute = $derived(pathname === '/agent' || pathname.startsWith('/agent/'));
-	const excludeConfigureBanner = [
-		...(version.current.agentsEnabled !== false ? ['/admin/model-providers'] : []),
-		'/admin/auth-providers',
-		'/admin/branding'
-	];
 	$effect(() => {
 		const isAdminOrBootstrapUser =
 			profile.current.loaded &&
@@ -772,6 +770,74 @@
 			dismissedAt: new Date().toISOString()
 		} satisfies BannerDismissState;
 	}
+
+	const COMMUNITY_SIGNUP_BANNER_KEY = '@obot/dismiss-community-signup-banner';
+	let communitySignupBannerDismissed = localState<BannerDismissState | undefined>(
+		COMMUNITY_SIGNUP_BANNER_KEY,
+		undefined,
+		{
+			parse: (value) => {
+				if (!value) return undefined;
+				try {
+					const parsed = JSON.parse(value) as unknown;
+					if (parsed && typeof parsed === 'object') {
+						const dismissedAt = (parsed as BannerDismissState).dismissedAt;
+						return {
+							dismissedAt: typeof dismissedAt === 'string' ? dismissedAt : undefined
+						} satisfies BannerDismissState;
+					}
+					return undefined;
+				} catch {
+					return undefined;
+				}
+			}
+		}
+	);
+
+	function handleDismissCommunitySignupBanner() {
+		communitySignupBannerDismissed.current = {
+			dismissedAt: new Date().toISOString()
+		} satisfies BannerDismissState;
+	}
+
+	function isCommunitySignupDismissedForCurrentProfile() {
+		const dismissedAt = communitySignupBannerDismissed.current?.dismissedAt;
+		const dismissedDate = dismissedAt ? new Date(dismissedAt) : undefined;
+		const hasValidDismissedAt =
+			dismissedDate !== undefined && !Number.isNaN(dismissedDate.getTime());
+		if (!hasValidDismissedAt) return false;
+
+		const profileCreatedMs = profile.current.created
+			? new Date(profile.current.created).getTime()
+			: undefined;
+		if (
+			profileCreatedMs === undefined ||
+			Number.isNaN(profileCreatedMs) ||
+			profileCreatedMs < dismissedDate.getTime()
+		) {
+			return true;
+		}
+
+		return false;
+	}
+
+	const hasCommunityOrEnterpriseLicense = $derived.by(() => {
+		if (version.current.enterprise || licenseStore.current.enterprise) return true;
+		const entitlements = [
+			...(licenseStore.current.entitlements ?? []),
+			...(version.current.licenseEntitlements ?? [])
+		];
+		return (
+			entitlements.includes(COMMUNITY_ENTITLEMENT) || entitlements.includes(ENTERPRISE_ENTITLEMENT)
+		);
+	});
+
+	const canShowCommunitySignup = $derived.by(() => {
+		if (!(profile.current.hasAdminAccess?.() || profile.current.isBootstrapUser?.())) return false;
+		if (hasCommunityOrEnterpriseLicense) return false;
+		if (!communitySignupBannerDismissed.isReady) return false;
+		return !isCommunitySignupDismissedForCurrentProfile();
+	});
 
 	let showAppNotificationBanner = $derived.by(() => {
 		if (isAgentRoute) return false;
@@ -916,6 +982,8 @@
 						data={appNotificationStore.current?.banner}
 						onDismiss={handleDismissBanner}
 					/>
+				{:else if canShowCommunitySignup}
+					<CommunitySignupBanner onDismiss={handleDismissCommunitySignupBanner} />
 				{/if}
 				<Navbar class={twMerge('dark:bg-base-100', classes?.navbar)} {hideProfileButton}>
 					{#snippet leftContent()}
@@ -977,9 +1045,6 @@
 						classes?.childrenContainer ?? ''
 					)}
 				>
-					{#if isAdminRoute && !excludeConfigureBanner.includes(pathname)}
-						<ConfigureBanner />
-					{/if}
 					{#if (!layout.sidebarOpen || hideSidebar) && !alwaysShowHeaderTitle}
 						<div
 							class={twMerge(
