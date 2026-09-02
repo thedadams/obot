@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/obot-platform/nah/pkg/name"
@@ -191,6 +192,7 @@ func (h *MCPCatalogHandler) Update(req api.Context) error {
 func (h *MCPCatalogHandler) ListEntries(req api.Context) error {
 	catalogName := req.PathValue("catalog_id")
 	workspaceID := req.PathValue("workspace_id")
+	minimal, _ := strconv.ParseBool(req.URL.Query().Get("minimal"))
 	var powerUserID string
 
 	// Verify the scope exists
@@ -226,7 +228,7 @@ func (h *MCPCatalogHandler) ListEntries(req api.Context) error {
 	if (req.UserIsAdmin() || req.UserIsAuditor()) && req.URL.Query().Get("all") == "true" {
 		entries := make([]types.MCPServerCatalogEntry, 0, len(list.Items))
 		for _, entry := range list.Items {
-			entries = append(entries, ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, powerUserID, h.serverURL))
+			entries = append(entries, convertMCPServerCatalogEntryForList(entry, workspaceID, powerUserID, h.serverURL, minimal))
 		}
 		return req.Write(types.MCPServerCatalogEntryList{Items: entries})
 	}
@@ -255,7 +257,7 @@ func (h *MCPCatalogHandler) ListEntries(req api.Context) error {
 			if !req.UserIsAdmin() && entryRequiresStaticOAuthCreds(entry) {
 				continue
 			}
-			entries = append(entries, ConvertMCPServerCatalogEntryWithWorkspace(entry, workspaceID, powerUserID, h.serverURL))
+			entries = append(entries, convertMCPServerCatalogEntryForList(entry, workspaceID, powerUserID, h.serverURL, minimal))
 		}
 	}
 

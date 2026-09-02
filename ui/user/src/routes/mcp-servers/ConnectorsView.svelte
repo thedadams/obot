@@ -7,7 +7,7 @@
 	import McpDeprecatedNotice from '$lib/components/mcp/McpDeprecatedNotice.svelte';
 	import McpSelectServerDeployment from '$lib/components/mcp/McpSelectServerDeployment.svelte';
 	import McpTunnelDisconnectedStatus from '$lib/components/mcp/McpTunnelDisconnectedStatus.svelte';
-	import { stripMarkdownToText } from '$lib/markdown';
+	import { toInlineHTMLFromMarkdown } from '$lib/markdown';
 	import {
 		UserService,
 		type MCPCatalog,
@@ -115,6 +115,15 @@
 			: sorted;
 	});
 
+	let shortDescriptionHTML = $derived(
+		new Map(
+			tableData.map((item) => [
+				item.id,
+				toInlineHTMLFromMarkdown(item.data.manifest.shortDescription ?? '')
+			])
+		)
+	);
+
 	let hasLicenseEntitlementViolations = $derived(
 		(version.current.licenseEntitlementViolations || []).length > 0
 	);
@@ -195,6 +204,17 @@
 		}
 
 		openUrl(url, isCtrlClick);
+	}
+
+	function isInteractiveChildEvent(e: MouseEvent | KeyboardEvent) {
+		if (!(e.target instanceof Element)) {
+			return false;
+		}
+
+		const interactiveElement = e.target.closest(
+			'a, button, input, select, textarea, [role="button"]'
+		);
+		return interactiveElement !== null && interactiveElement !== e.currentTarget;
 	}
 
 	function handleConnect(d: MCPCatalogEntry | MCPCatalogServer) {
@@ -279,19 +299,26 @@
 				role="button"
 				tabindex="0"
 				onkeydown={(e) => {
+					if (isInteractiveChildEvent(e)) {
+						return;
+					}
 					if (e.key === 'Enter' || e.key === ' ') {
 						e.preventDefault();
 						e.stopPropagation();
 						handleSelect(d.data, e);
 					}
 				}}
-				onclick={(e) => handleSelect(d.data, e)}
+				onclick={(e) => {
+					if (!isInteractiveChildEvent(e)) {
+						handleSelect(d.data, e);
+					}
+				}}
 			>
 				<div class="text-sm font-light">
 					<div class="flex items-center gap-2">
 						<div class="icon">
 							{#if d.icon}
-								<img src={d.icon} alt={d.name} class="size-6" />
+								<img src={d.icon} alt={d.name} class="size-6" loading="lazy" decoding="async" />
 							{:else}
 								<Server class="size-6" />
 							{/if}
@@ -318,8 +345,9 @@
 							{/if}
 						</div>
 					</div>
-					<p class="text-xs text-muted-content min-h-8 mt-2 line-clamp-2">
-						{stripMarkdownToText(d.data.manifest.description ?? '')}
+					<p class="text-xs text-muted-content mt-1 line-clamp-2">
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized by toInlineHTMLFromMarkdown -->
+						{@html shortDescriptionHTML.get(d.id) ?? ''}
 					</p>
 				</div>
 				<div
