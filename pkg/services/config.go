@@ -62,6 +62,7 @@ import (
 	storageservices "github.com/obot-platform/obot/pkg/storage/services"
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/obot-platform/obot/pkg/tunnel"
+	"github.com/obot-platform/obot/pkg/upgrade"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -260,7 +261,6 @@ type Services struct {
 	// environment/Helm config and not modifiable via UI.
 	PSASettingsFromHelm *v1.PodSecurityAdmissionSettings
 
-	DisableUpdateCheck      bool
 	HideK8sDetails          bool
 	MCPRuntimeBackend       string
 	MCPImagePullSecrets     []string
@@ -293,6 +293,7 @@ type Services struct {
 
 	// License provider
 	LicenseProvider *license.Provider
+	VersionChecker  *upgrade.VersionChecker
 }
 
 type hostedAgentPodSchedulingSettings struct {
@@ -1274,6 +1275,17 @@ func New(ctx context.Context, config Config) (*Services, error) {
 	if mcp.IsKubernetesBackend(config.MCPRuntimeBackend) {
 		mcpLocalK8sClient = apiLocalK8sClient
 	}
+
+	versionChecker, err := upgrade.NewVersionChecker(ctx, upgrade.VersionCheckerOptions{
+		GatewayClient:      gatewayClient,
+		LicenseProvider:    licenseProvider,
+		Engine:             config.MCPRuntimeBackend,
+		DisableUpdateCheck: config.DisableUpdateCheck,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// For now, always auto-migrate the gateway database
 	svcs := &Services{
 		EncryptionConfig:      encryptionConfig,
@@ -1351,7 +1363,6 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		StorageListenPort:                    config.StorageListenPort,
 		PodSchedulingSettingsFromHelm:        podSchedulingSettings,
 		PSASettingsFromHelm:                  psaSettings,
-		DisableUpdateCheck:                   config.DisableUpdateCheck,
 		HideK8sDetails:                       config.HideK8sDetails,
 		MCPRuntimeBackend:                    config.MCPRuntimeBackend,
 		MCPImagePullSecrets:                  config.MCPImagePullSecrets,
@@ -1377,6 +1388,7 @@ func New(ctx context.Context, config Config) (*Services, error) {
 		MCPNetworkPolicyProviderValues:       config.MCPNetworkPolicyProviderValues,
 		ArtifactBlobBucket:                   config.ArtifactStorageBucket,
 		LicenseProvider:                      licenseProvider,
+		VersionChecker:                       versionChecker,
 	}
 
 	if (config.ArtifactStorageProvider == "") != (config.ArtifactStorageBucket == "") {
