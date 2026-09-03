@@ -1312,9 +1312,7 @@
 										class="menu-button"
 										onclick={async () => {
 											await deleteCatalogEntryServer();
-											const url = profile.current.isAdmin?.()
-												? `/admin/mcp-catalog/c/${entry?.id}`
-												: `/mcp-catalog/c/${entry?.id}`;
+											const url = `/mcp-servers/c/${entry?.id}${workspaceID ? `?wid=${workspaceID}` : ''}`;
 											goto(url);
 											toggle(false);
 										}}

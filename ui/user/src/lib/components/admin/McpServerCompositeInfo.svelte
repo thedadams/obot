@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { page } from '$app/state';
 	import { ADMIN_SESSION_STORAGE, DEFAULT_MCP_CATALOG_ID } from '$lib/constants';
 	import {
 		AdminService,
@@ -34,7 +33,6 @@
 
 	let { name, connectedUsers, classes, entityId, catalogEntry, mcpServerId, hideTitle }: Props =
 		$props();
-	let isAdminUrl = $derived(page.url.pathname.includes('/admin'));
 	let servers = $state<MCPCatalogServer[]>([]);
 	let loadingServers = $state(true);
 	let failedToLoadServers = $state(false);
@@ -89,13 +87,13 @@
 				{#if componentExists}
 					<button
 						onclick={(e) => {
-							const prefix = page.url.pathname.startsWith('/admin/mcp-deployments')
-								? 'mcp-deployments'
-								: 'mcp-catalog';
 							const isCtrlClick = e.metaKey || e.ctrlKey;
+							const workspaceScope = catalogEntry.powerUserWorkspaceID
+								? `?wid=${encodeURIComponent(catalogEntry.powerUserWorkspaceID)}`
+								: '';
 							const url = componentServer.catalogEntryID
-								? `/admin/${prefix}/c/${componentServer.catalogEntryID}/instance/${catalogEntryServerId}/details`
-								: `/admin/${prefix}/s/${componentServer.mcpServerID}/details`;
+								? `/mcp-servers/c/${componentServer.catalogEntryID}/instance/${catalogEntryServerId}/details${workspaceScope}`
+								: `/mcp-servers/s/${componentServer.mcpServerID}/details${workspaceScope}`;
 
 							sessionStorage.setItem(
 								ADMIN_SESSION_STORAGE.LAST_VISITED_MCP_SERVER,
@@ -195,10 +193,10 @@
 		{/snippet}
 
 		{#snippet actions(d)}
-			{#if catalogEntry?.id && isAdminUrl && profile.current?.hasAdminAccess?.()}
+			{#if catalogEntry?.id && profile.current?.hasAdminAccess?.()}
 				<a
 					href={resolve(
-						`/admin/mcp-catalog/c/${catalogEntry.id}?view=audit-logs&user_id=${encodeURIComponent(d.id)}`
+						`/mcp-servers/c/${catalogEntry.id}?view=audit-logs&user_id=${encodeURIComponent(d.id)}${catalogEntry.powerUserWorkspaceID ? `&wid=${encodeURIComponent(catalogEntry.powerUserWorkspaceID)}` : ''}`
 					)}
 					class="btn btn-link"
 				>

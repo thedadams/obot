@@ -1,37 +1,34 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import Layout from '$lib/components/Layout.svelte';
 	import McpServerEntryForm from '$lib/components/admin/McpServerEntryForm.svelte';
+	import McpConnectUrlDialog from '$lib/components/mcp/McpConnectUrlDialog.svelte';
 	import McpDeprecatedNotice from '$lib/components/mcp/McpDeprecatedNotice.svelte';
 	import McpServerActions from '$lib/components/mcp/McpServerActions.svelte';
 	import { VirtualPageViewport } from '$lib/components/ui/virtual-page';
 	import { DEFAULT_MCP_CATALOG_ID, PAGE_TRANSITION_DURATION } from '$lib/constants';
-	import { UserService } from '$lib/services';
+	import { AdminService } from '$lib/services';
 	import { getMCPDisplayName, isDeprecatedMCPServer } from '$lib/services/user/mcp';
 	import { profile } from '$lib/stores';
-	import { type Component } from 'svelte';
+	import { isConnectorsNavigation } from '../../utils.js';
+	import { Link2Icon } from '@lucide/svelte';
+	import type { Component } from 'svelte';
 	import { fly } from 'svelte/transition';
 
 	const duration = PAGE_TRANSITION_DURATION;
 
-	let { data } = $props();
-	let { mcpServer, catalogEntry, workspaceId } = $derived(data);
-	let title = $derived(getMCPDisplayName(mcpServer) || 'MCP Server');
-	let serverWorkspaceId = $derived(mcpServer?.powerUserWorkspaceID);
-	let serverScopeEntity = $derived(
-		serverWorkspaceId ? ('workspace' as const) : ('catalog' as const)
-	);
-	let serverScopeID = $derived(
-		serverWorkspaceId || mcpServer?.mcpCatalogID || DEFAULT_MCP_CATALOG_ID
-	);
+	let connectUrlDialog = $state<ReturnType<typeof McpConnectUrlDialog>>();
 
-	let limitViews = $derived(
-		(serverWorkspaceId && workspaceId === serverWorkspaceId) || profile.current.hasAdminAccess?.()
-			? ['overview', 'tools', 'server-instances']
-			: ['overview', 'tools']
-	);
+	let { data } = $props();
+	let { mcpServer, catalogEntry } = $derived(data);
+	let workspaceId = $derived(mcpServer?.powerUserWorkspaceID);
+	let serverScopeEntity = $derived(workspaceId ? ('workspace' as const) : ('catalog' as const));
+	let serverScopeID = $derived(workspaceId || mcpServer?.mcpCatalogID || DEFAULT_MCP_CATALOG_ID);
+	let title = $derived(getMCPDisplayName(mcpServer) || 'MCP Server');
 	let deprecated = $derived(
 		isDeprecatedMCPServer(catalogEntry) || isDeprecatedMCPServer(mcpServer)
 	);
+	let preview = $derived(isConnectorsNavigation(page.url));
 </script>
 
 <Layout
@@ -46,32 +43,42 @@
 		<McpServerActions
 			server={mcpServer}
 			entry={catalogEntry}
-			catalogID={mcpServer?.mcpCatalogID}
+			catalogID={workspaceId ? undefined : serverScopeID}
 			workspaceID={workspaceId}
+			readonly={profile.current.isAdminReadonly?.()}
 			allowMultiUserServerConfigurationEdit
 			onOAuthConfigured={() => {
 				if (!mcpServer) return;
-				UserService.getMcpCatalogServer(mcpServer.id).then((server) => {
+				AdminService.getMCPCatalogServer(serverScopeID, mcpServer.id).then((server) => {
 					mcpServer = server;
 				});
 			}}
+			hideActions
 		/>
+		<button
+			class="btn btn-primary"
+			onclick={() => connectUrlDialog?.open(catalogEntry, mcpServer?.connectURL, mcpServer)}
+		>
+			<Link2Icon class="size-4" /> Connect URL
+		</button>
 	{/snippet}
+
 	<div class="flex h-full flex-col gap-6 pb-8" in:fly={{ x: 100, delay: duration, duration }}>
 		<McpDeprecatedNotice {deprecated} variant="notification" />
 
-		{#if mcpServer}
-			<McpServerEntryForm
-				entry={mcpServer}
-				type="multi"
-				id={serverScopeID}
-				entity={serverScopeEntity}
-				{limitViews}
-				connectOnly
-			/>
-		{/if}
+		<McpServerEntryForm
+			entry={mcpServer}
+			type="multi"
+			id={serverScopeID}
+			entity={serverScopeEntity}
+			readonly={profile.current.isAdminReadonly?.()}
+			allowMultiUserServerConfigurationEdit
+			limitViews={preview ? ['overview', 'tools'] : undefined}
+		/>
 	</div>
 </Layout>
+
+<McpConnectUrlDialog bind:this={connectUrlDialog} />
 
 <svelte:head>
 	<title>Obot | {title}</title>

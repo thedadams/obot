@@ -17,6 +17,8 @@ export const handlers = [
 	http.get('/api/default-model-aliases', () =>
 		HttpResponse.json({ items: data.listDefaultModelAliasesResponse })
 	),
+	http.get('/api/image-pull-secrets/capability', () => HttpResponse.json({ available: false })),
+	http.get('/api/image-pull-secrets', () => HttpResponse.json({ items: [] })),
 	http.get('/api/eula', () => HttpResponse.json({ accepted: true })),
 	http.get('/api/license', () => HttpResponse.json(data.getLicenseResponse)),
 	http.delete('/api/license', () => HttpResponse.json(data.getLicenseResponse)),

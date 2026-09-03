@@ -92,23 +92,26 @@
 
 	$effect(() => {
 		const pathname = page.url.pathname;
-		const scope = pathname.startsWith('/mcp-servers') ? 'user' : 'admin';
-		const isMcpCatalogRoute =
-			pathname === '/mcp-catalog' ||
-			pathname === '/admin/mcp-catalog' ||
-			pathname === '/mcp-servers';
+		const view = page.url.searchParams.get('view');
+		const usesAdminMcpData =
+			(pathname === '/mcp-servers' && (view === 'entries' || view === 'access-policies')) ||
+			pathname.startsWith('/mcp-servers/access-policies/');
+		const scope = usesAdminMcpData ? 'admin' : 'user';
 		if (profile.current.loaded) {
-			untrack(() => mcpServersAndEntries.initialize({ forceRefresh: isMcpCatalogRoute, scope }));
+			untrack(() => mcpServersAndEntries.initialize({ forceRefresh: usesAdminMcpData, scope }));
 		}
 	});
 
 	$effect(() => {
 		const pathname = page.url.pathname;
+		const view = page.url.searchParams.get('view');
+		const isSingleMcpServerView =
+			pathname.startsWith('/mcp-servers/c/') || pathname.startsWith('/mcp-servers/s/');
+		const isValidMcpServersView =
+			pathname === '/mcp-servers' &&
+			(!view || ['servers', 'entries', 'deployments', 'tunnels'].includes(view));
 		const usesMcpTunnelStatus =
-			pathname.startsWith('/mcp-servers') ||
-			pathname.startsWith('/mcp-catalog') ||
-			pathname.startsWith('/admin/mcp-catalog') ||
-			pathname.startsWith('/admin/mcp-deployments');
+			isSingleMcpServerView || isValidMcpServersView || pathname.startsWith('/vmcps');
 
 		if (profile.current.loaded && usesMcpTunnelStatus) {
 			return mcpTunnelConnections.startPolling();

@@ -109,7 +109,6 @@
 
 	let entry = $state(untrack(() => initialEntry));
 	let lastSyncedInitialEntry: MCPCatalogEntry | MCPCatalogServer | undefined = undefined;
-	let prefix = $derived(profile.current.hasAdminAccess?.() ? '/admin' : '');
 
 	$effect(() => {
 		const next = initialEntry;
@@ -676,7 +675,7 @@
 		if (onCancel) {
 			onCancel();
 		} else {
-			goto(`${prefix}/mcp-catalog`);
+			goto('/mcp-servers');
 		}
 	}
 
@@ -993,15 +992,13 @@
 					if (!entry) return;
 					setLastVisitedMcpServer();
 
-					const isAdminRoute = window.location.pathname.includes('/admin/');
-
 					let url: string;
 					if (entity === 'workspace') {
-						url = !isAdminRoute
+						url = !profile.current.hasAdminAccess?.()
 							? `/mcp-access-policies/${d.id}`
-							: `/admin/mcp-access-policies/w/${id}/r/${d.id}`;
+							: `/mcp-servers/access-policies/w/${id}/r/${d.id}`;
 					} else {
-						url = `/admin/mcp-access-policies/${d.id}`;
+						url = `/mcp-servers/access-policies/${d.id}`;
 					}
 					openUrl(url, isCtrlClick);
 				}}
@@ -1105,7 +1102,7 @@
 							{@const param = entryId ? 'mcpId=' + entryId : 'entryId=' + mcpCatalogEntryId}
 							<p class="text-muted-content text-sm font-light">
 								See more usage details in the server's <a
-									href={resolve(`/admin/audit-logs?${param}`)}
+									href={resolve(`/audit-logs?${param}`)}
 									class="text-link"
 								>
 									Audit Logs
@@ -1138,7 +1135,7 @@
 					]}
 					onClickRow={(d, isCtrlClick) => {
 						setLastVisitedMcpServer();
-						const url = `/admin/filters/${d.id}`;
+						const url = `/mcp-servers/filters/${d.id}`;
 						openUrl(url, isCtrlClick);
 					}}
 				>
@@ -1357,7 +1354,7 @@
 	show={deleteServer}
 	onsuccess={async () => {
 		if (!id || !entry) return;
-		const url = `${prefix}/mcp-catalog` as `/${string}`;
+		const url = '/mcp-servers' as `/${string}`;
 
 		if (!('isCatalogEntry' in entry)) {
 			const workspaceID = entry.powerUserWorkspaceID || (entity === 'workspace' ? id : undefined);

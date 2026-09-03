@@ -43,7 +43,8 @@
 		Power,
 		LockOpen,
 		HatGlasses,
-		Terminal
+		Terminal,
+		SquareTerminal
 	} from '@lucide/svelte';
 	import { twMerge } from 'tailwind-merge';
 
@@ -258,6 +259,9 @@
 				>
 					<Terminal class="size-4" /> Client Preference
 				</button>
+				<a class="dropdown-link" href={resolve('/install-cli')} target="_blank" rel="external">
+					<SquareTerminal class="size-4" /> Install Obot CLI
+				</a>
 
 				{#if profile.current.isBootstrapUser?.()}
 					<button class="dropdown-link" onclick={handleBootstrapLogout}>
@@ -272,37 +276,34 @@
 		</div>
 		<div class="mt-2 p-2">
 			{#if showChatLink && !impersonating && agentsFeatureEnabled}
-				<button
-					class={twMerge(
-						'dropdown-link',
-						!agentLinkEnabled && 'cursor-default hover:bg-transparent dark:hover:bg-transparent'
-					)}
-					onclick={async (event) => {
-						if (!agentLinkEnabled) return;
-						navigateTo('/agent', event?.ctrlKey || event?.metaKey);
-					}}
-					aria-disabled={!agentLinkEnabled}
-				>
-					<span class={twMerge('flex items-center gap-2', !agentLinkEnabled && 'opacity-50')}>
-						<BotMessageSquare class="size-4" /> Launch Agent
-					</span>
-					{#if !agentLinkEnabled}
+				{#if agentLinkEnabled}
+					<button
+						class="dropdown-link"
+						onclick={(event) => {
+							navigateTo('/agent', event?.ctrlKey || event?.metaKey);
+						}}
+					>
+						<span class="flex items-center gap-2">
+							<BotMessageSquare class="size-4" /> Launch Agent
+						</span>
+					</button>
+				{:else}
+					<div class="dropdown-link cursor-default hover:bg-transparent dark:hover:bg-transparent">
+						<span class="flex items-center gap-2 opacity-50">
+							<BotMessageSquare class="size-4" /> Launch Agent
+						</span>
 						<InfoTooltip
 							text={profile.current.isAdmin?.()
 								? ADMIN_AGENT_DISABLED_MESSAGE
 								: USER_AGENT_DISABLED_MESSAGE}
 							icon={LockOpen}
 						/>
-					{/if}
-				</button>
+					</div>
+				{/if}
 			{/if}
 			{#if showMcpManagement && !impersonating}
-				<a
-					href={resolve(profile.current.hasAdminAccess?.() ? '/admin/dashboard' : '/mcp-servers')}
-					rel="external"
-					class="dropdown-link"
-				>
-					<LayoutDashboard class="size-4" /> MCP Platform
+				<a href={resolve('/dashboard')} rel="external" class="dropdown-link">
+					<LayoutDashboard class="size-4" /> App Platform
 				</a>
 			{/if}
 			{#if version.current.obot}
