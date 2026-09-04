@@ -21,4 +21,8 @@ const (
 	AgentCatalogSyncAnnotation          = "obot.ai/agent-catalog-sync"
 	MCPServerCatalogEntrySyncAnnotation = "obot.ai/mcp-server-catalog-entry-sync"
 	ModelInfoSourceSyncAnnotation       = "obot.ai/model-info-source-sync"
+
+	// AuditLogCredentialRemovedAnnotation records that a server's legacy token exchange and
+	// audit log credential has been removed, so the sweep runs once and not on every reconcile.
+	AuditLogCredentialRemovedAnnotation = "obot.ai/audit-log-credential-removed"
 )
