@@ -2,10 +2,9 @@
 	import Confirm from '$lib/components/Confirm.svelte';
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
 	import CompositeEditTools from '$lib/components/mcp/composite/CompositeEditTools.svelte';
-	import CompositeToolsSetup from '$lib/components/mcp/composite/CompositeSelectServerAndToolsSetup.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
-	import { DEFAULT_MCP_CATALOG_ID } from '$lib/constants';
 	import type { VMcpToolDialog, VMcpToolFlow } from '$lib/runes/vmcps/vmcpToolFlow.svelte';
+	import VMcpToolsSetup from './VMcpToolsSetup.svelte';
 	import { RefreshCcw, Server, Trash2 } from '@lucide/svelte';
 
 	interface Props {
@@ -14,7 +13,7 @@
 
 	let { flow }: Props = $props();
 	let addedCreateDialog = $state<ReturnType<typeof ResponsiveDialog>>();
-	let setupDialog = $state<ReturnType<typeof CompositeToolsSetup>>();
+	let setupDialog = $state<ReturnType<typeof VMcpToolsSetup>>();
 	let editDialog = $state<ReturnType<typeof CompositeEditTools>>();
 	let componentActionsDialog = $state<ReturnType<typeof ResponsiveDialog>>();
 	let renderedDialog: VMcpToolDialog | undefined;
@@ -60,7 +59,7 @@
 >
 	{#snippet note()}
 		Are you sure you want to remove "<b>{flow.pendingRemoval?.component.name ?? 'this server'}</b>"
-		from <b>{flow.pendingRemoval?.vmcp.manifest.name ?? 'this vMCP'}</b>? The tools for this server
+		from <b>{flow.pendingRemoval?.vmcp.displayName ?? 'this vMCP'}</b>? The tools for this server
 		will no longer be available.
 	{/snippet}
 </Confirm>
@@ -82,8 +81,9 @@
 		{@render serverHeading()}
 	{/snippet}
 	{#snippet note()}
-		<b>{flow.addedServer?.component.manifest.name ?? 'this server'}</b> has been added to
-		<b>{flow.addedServer?.vmcp.manifest.name ?? 'this vMCP'}</b>. Would you like to add all tools or
+		<b>{flow.addedServer?.component.catalogEntry.manifest.name ?? 'this server'}</b> has been added
+		to
+		<b>{flow.addedServer?.vmcp.displayName ?? 'this vMCP'}</b>. Would you like to add all tools or
 		select which tools to enable?
 	{/snippet}
 </Confirm>
@@ -100,9 +100,10 @@
 			{@render serverHeading()}
 		</div>
 		<p class="mb-4 text-sm font-light">
-			<b>{flow.addedServer?.component.manifest.name ?? 'this server'}</b> has been added to
-			<b>{flow.addedServer?.vmcp.manifest.name ?? 'this vMCP'}</b>. Would you like to add all tools
-			or select which tools to enable?
+			<b>{flow.addedServer?.component.catalogEntry.manifest.name ?? 'this server'}</b> has been
+			added to
+			<b>{flow.addedServer?.vmcp.displayName ?? 'this vMCP'}</b>. Would you like to add all tools or
+			select which tools to enable?
 		</p>
 		<div class="flex flex-col gap-2">
 			<button class="btn btn-secondary btn-sm text-xs" onclick={flow.close}>Add All Tools</button>
@@ -113,27 +114,29 @@
 	{/if}
 </ResponsiveDialog>
 
-<CompositeToolsSetup
+<VMcpToolsSetup
 	bind:this={setupDialog}
-	catalogId={DEFAULT_MCP_CATALOG_ID}
-	configuringEntry={flow.configuringEntry}
-	compositeEntryId={flow.modifyingVMcp?.id}
-	componentId={flow.configuringComponentId}
-	isNewComponent={!flow.modifyingExistingComponent}
+	component={flow.configuringComponent}
+	vmcpID={flow.modifyingVMcp?.id}
+	refresh={flow.refresh}
 	existingTools={flow.tools}
 	existingToolPrefix={flow.existingToolPrefix}
 	otherEffectiveNames={flow.otherEffectiveNames}
 	otherToolPrefixes={flow.otherToolPrefixes}
-	excluded={flow.excludedComponentIds}
 	onCancel={flow.close}
-	onSuccess={flow.saveTools}
+	onSuccess={(config) =>
+		flow.saveTools({
+			...flow.configuringComponent!,
+			toolPrefix: config.toolPrefix,
+			toolOverrides: config.toolOverrides
+		})}
 >
 	{#snippet additionalActions()}
 		{#if flow.modifyingExistingComponent}
 			{@render removeComponentButton()}
 		{/if}
 	{/snippet}
-</CompositeToolsSetup>
+</VMcpToolsSetup>
 
 <ResponsiveDialog
 	class="md:w-sm"
@@ -154,7 +157,7 @@
 	{/snippet}
 	<p class="mb-4 text-sm font-light">
 		All tools are enabled on
-		<b class="font-semibold">{flow.modifyingVMcp?.manifest.name ?? 'this vMCP'}</b> by default. What would
+		<b class="font-semibold">{flow.modifyingVMcp?.displayName ?? 'this vMCP'}</b> by default. What would
 		you like to do?
 	</p>
 	<div class="flex flex-col gap-2">
@@ -178,7 +181,7 @@
 		<div class="flex items-center gap-3">
 			{@render removeComponentButton()}
 			<IconButton
-				tooltip={{ text: 'Refresh Tools', disablePortal: true, placement: 'right' }}
+				tooltip={{ text: 'Refresh tools', disablePortal: true, placement: 'right' }}
 				onclick={flow.refreshTools}
 				class="dark:hover:bg-base-300"
 			>
@@ -190,14 +193,14 @@
 
 {#snippet serverHeading()}
 	<span class="flex items-center gap-2 text-base font-semibold">
-		{#if flow.addedServer?.component.manifest.icon}
-			<img src={flow.addedServer.component.manifest.icon} alt="" class="size-6 icon" />
+		{#if flow.addedServer?.component.catalogEntry.manifest.icon}
+			<img src={flow.addedServer.component.catalogEntry.manifest.icon} alt="" class="size-6 icon" />
 		{:else}
 			<div class="icon">
 				<Server class="size-6" />
 			</div>
 		{/if}
-		{flow.addedServer?.component.manifest.name}
+		{flow.addedServer?.component.catalogEntry.manifest.name}
 	</span>
 {/snippet}
 

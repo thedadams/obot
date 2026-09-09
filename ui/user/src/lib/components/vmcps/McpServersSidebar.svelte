@@ -60,8 +60,6 @@
 	let eligibleEntries = $derived(
 		mcpServersAndEntries.current.entries.filter(
 			(entry) =>
-				entry.manifest.runtime !== 'composite' &&
-				entry.manifest.serverUserType !== 'multiUser' &&
 				(settings.showDeprecatedServers || !isDeprecatedMCPServer(entry)) &&
 				(showAllConnectors || !isWorkspaceOwned(entry))
 		)

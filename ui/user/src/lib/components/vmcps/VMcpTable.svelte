@@ -3,7 +3,7 @@
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import type { EntryDrag } from '$lib/runes/vmcps/entryDrag.svelte';
-	import type { MCPCatalogEntry } from '$lib/services';
+	import type { VMCP } from '$lib/services';
 	import type { VMcpComponentView } from '$lib/services/vmcps/types';
 	import { responsive } from '$lib/stores';
 	import { formatTimeAgo } from '$lib/time';
@@ -14,13 +14,13 @@
 	import { twMerge } from 'tailwind-merge';
 
 	interface Props {
-		items: MCPCatalogEntry[];
+		items: VMCP[];
 		drag: EntryDrag;
-		components: (vmcp: MCPCatalogEntry) => VMcpComponentView[];
+		components: (vmcp: VMCP) => VMcpComponentView[];
 		rightPanelWidth?: number;
 		actions?: Snippet;
-		onEdit?: (component: VMcpComponentView, vmcp: MCPCatalogEntry) => void;
-		onDelete?: (component: VMcpComponentView, vmcp: MCPCatalogEntry) => void;
+		onEdit?: (component: VMcpComponentView, vmcp: VMCP) => void;
+		onDelete?: (component: VMcpComponentView, vmcp: VMCP) => void;
 	}
 
 	let { items, drag, components, rightPanelWidth, actions, onEdit, onDelete }: Props = $props();
@@ -28,11 +28,11 @@
 	let tableData = $derived(
 		items.map((item) => ({
 			id: item.id,
-			name: item.manifest.name,
+			name: item.displayName,
 			created: item.created,
-			componentServersCount: item.manifest?.compositeConfig?.componentServers?.length ?? 0,
-			powerUserID: item.powerUserID,
-			powerUserWorkspaceID: item.powerUserWorkspaceID,
+			componentServersCount: item.components.length,
+			powerUserID: item.userID,
+			powerUserWorkspaceID: undefined,
 			data: item
 		}))
 	);
@@ -44,7 +44,7 @@
 	let selectedVMcp = $derived(items.find((item) => item.id === selectedId));
 	let selectedComponents = $derived(selectedVMcp ? components(selectedVMcp) : []);
 
-	function openVMcp(vmcp: MCPCatalogEntry) {
+	function openVMcp(vmcp: VMCP) {
 		selectedId = vmcp.id;
 		vMcpDialog?.open();
 	}
@@ -86,7 +86,7 @@
 
 <ResponsiveDialog
 	bind:this={vMcpDialog}
-	title={selectedVMcp?.manifest.name}
+	title={selectedVMcp?.displayName}
 	rightPanelWidth={responsive.isMobile ? undefined : rightPanelWidth}
 	onOpen={() => (dialogOpen = true)}
 	onClose={() => {
@@ -143,7 +143,7 @@
 				linked && 'vmcp-drop-target border-primary border-solid'
 			)}
 			role="region"
-			aria-label={`MCP Servers in ${selectedVMcp.manifest.name ?? 'vMCP'}`}
+			aria-label={`MCP Servers in ${selectedVMcp.displayName || 'vMCP'}`}
 		>
 			<p class="text-muted-content text-xs italic text-center">
 				{selectedComponents.length === 0

@@ -4,13 +4,14 @@
 	import DotDotDot from '$lib/components/DotDotDot.svelte';
 	import { formatNumber } from '$lib/format';
 	import type { EntryDrag } from '$lib/runes/vmcps/entryDrag.svelte';
-	import type { MCPCatalogEntry } from '$lib/services';
+	import type { VMCP } from '$lib/services';
 	import { windowRange } from '$lib/services/vmcps/camera';
 	import {
 		VMCP_COMPONENT_HEIGHT,
 		VMCP_COMPONENT_WINDOW_THRESHOLD
 	} from '$lib/services/vmcps/constants';
 	import type { RowContext, VMcpComponentView } from '$lib/services/vmcps/types';
+	import { vmcpConnectURL } from '$lib/services/vmcps/utils';
 	import McpServerIcon from './McpServerIcon.svelte';
 	import './vmcpGraph.css';
 	import { ChevronsRight, ExternalLink, Layers, PencilRuler, Server } from '@lucide/svelte';
@@ -22,7 +23,7 @@
 	const CHAIN_STAGGER_MAX_STEPS = 6;
 
 	interface Props {
-		vmcp: MCPCatalogEntry;
+		vmcp: VMCP;
 		components: VMcpComponentView[];
 		expanded: boolean;
 		context: RowContext;
@@ -194,8 +195,8 @@
 		class="bg-base-100 dark:bg-base-300 dark:border-base-400 text-base-content relative z-10 flex items-center gap-2 rounded-lg border border-transparent px-3 py-2 text-left shadow-md"
 		aria-expanded={expanded}
 		aria-label={expanded
-			? `Hide servers in ${vmcp.manifest.name ?? 'vMCP'}`
-			: `Show ${components.length} ${label} in ${vmcp.manifest.name ?? 'vMCP'}`}
+			? `Hide servers in ${vmcp.displayName || 'vMCP'}`
+			: `Show ${components.length} ${label} in ${vmcp.displayName || 'vMCP'}`}
 		onclick={onToggleExpand}
 	>
 		<Server class="text-primary size-4 shrink-0" />
@@ -225,13 +226,13 @@
 						type="button"
 						class="flex min-w-0 grow cursor-pointer items-center gap-2 rounded-md text-left after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
 						onclick={onEdit}
-						aria-label={`Edit ${vmcp.manifest.name ?? 'vMCP'}`}
+						aria-label={`Edit ${vmcp.displayName || 'vMCP'}`}
 					>
 						<div class="bg-primary/10 text-primary shrink-0 rounded-md p-2">
 							<Layers class="size-5" />
 						</div>
 						<div class="flex min-w-0 grow flex-col">
-							<p class="truncate text-sm font-semibold">{vmcp.manifest.name}</p>
+							<p class="truncate text-sm font-semibold">{vmcp.displayName}</p>
 						</div>
 					</button>
 					<DotDotDot
@@ -282,7 +283,7 @@
 						</button>
 						<CopyButton
 							tooltipText="Copy Connect URL"
-							text={vmcp.connectURL}
+							text={vmcpConnectURL(vmcp)}
 							noButtonText
 							classes={{
 								button:
@@ -322,7 +323,7 @@
 			linked && 'vmcp-drop-target border-primary'
 		)}
 		role="region"
-		aria-label={`MCP Servers in ${vmcp.manifest.name ?? 'vMCP'}`}
+		aria-label={`MCP Servers in ${vmcp.displayName || 'vMCP'}`}
 		in:fade={{ delay: CREATE_WIRE_DURATION_MS, duration: 200 }}
 	>
 		<p class="text-muted-content text-xs italic">

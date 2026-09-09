@@ -55,7 +55,7 @@ type ServerConfig struct {
 	ContainerPath  string `json:"containerPath"`
 	HealthzPath    string `json:"healthzPath,omitempty"`
 
-	// Composite configuration.
+	// vMCP configuration.
 	Components []ComponentServer `json:"components"`
 
 	Scope                string `json:"scope"`
@@ -86,11 +86,12 @@ type File struct {
 }
 
 type ComponentServer struct {
-	Name        string               `json:"name"`
-	DisplayName string               `json:"displayName"`
-	URL         string               `json:"url"`
-	Tools       []types.ToolOverride `json:"tools"`
-	ToolPrefix  string               `json:"toolPrefix"`
+	DisableTools bool                 `json:"disableTools,omitempty"`
+	Name         string               `json:"name"`
+	DisplayName  string               `json:"displayName"`
+	URL          string               `json:"url"`
+	Tools        []types.ToolOverride `json:"tools"`
+	ToolPrefix   string               `json:"toolPrefix"`
 }
 
 func (s ServerConfig) IsAgentServer() bool {
@@ -223,17 +224,20 @@ func configureContainerizedRuntime(serverConfig *ServerConfig, containerizedConf
 	return nil
 }
 
-func configureRemoteRuntime(serverConfig *ServerConfig, remoteConfig *types.RemoteRuntimeConfig, credEnv map[string]string) ([]string, error) {
+func configureRemoteRuntime(serverConfig *ServerConfig, remoteConfig *types.RemoteRuntimeConfig, config []types.MCPConfig, credEnv map[string]string) ([]string, error) {
 	if remoteConfig == nil {
 		return nil, fmt.Errorf("remote runtime requires remote config")
 	}
 
 	serverConfig.URL = remoteConfig.URL
 	serverConfig.TunnelName = remoteConfig.TunnelName
-	serverConfig.Headers = make([]string, 0, len(remoteConfig.Headers))
+	serverConfig.Headers = make([]string, 0, len(config))
 
 	var missingRequiredNames []string
-	for _, header := range remoteConfig.Headers {
+	for _, header := range config {
+		if header.Usage != types.Header || header.UserAllowed {
+			continue
+		}
 		val := header.Value
 		if val == "" {
 			val = credEnv[header.Key]
@@ -257,113 +261,32 @@ func configureRemoteRuntime(serverConfig *ServerConfig, remoteConfig *types.Remo
 	return missingRequiredNames, nil
 }
 
-func CompositeServerToServerConfig(mcpServer v1.MCPServer, components []v1.MCPServer, instances []v1.MCPServerInstance, audiences []string, httpListenPort int, userID, scope, mcpCatalogName string, credEnv map[string]string) (ServerConfig, []string, error) {
-	config, missing, err := ServerToServerConfig(mcpServer, audiences, userID, scope, mcpCatalogName, credEnv)
-	if err != nil {
-		return config, missing, err
-	}
-
-	config.URL = system.MCPConnectCompositeURL(config.MCPServerName, httpListenPort)
-
-	overrides := make(map[string]types.ComponentServer, len(mcpServer.Spec.Manifest.CompositeConfig.ComponentServers))
-	for _, component := range mcpServer.Spec.Manifest.CompositeConfig.ComponentServers {
-		if component.CatalogEntryID != "" {
-			overrides[component.CatalogEntryID] = component
-		} else if component.MCPServerID != "" {
-			overrides[component.MCPServerID] = component
-		}
-	}
-
-	config.Components = make([]ComponentServer, 0, len(components)+len(instances))
-	for _, component := range components {
-		name := component.Spec.Manifest.Name
-		if name == "" {
-			name = component.Name
-		}
-
-		override := overrides[component.Spec.MCPServerCatalogEntryName]
-		if override.Disabled {
-			continue
-		}
-
-		tools := make([]types.ToolOverride, 0, len(override.ToolOverrides))
-		for _, tool := range override.ToolOverrides {
-			tools = append(tools, types.ToolOverride{
-				Name:                tool.Name,
-				OverrideName:        tool.OverrideName,
-				Description:         tool.Description,
-				OverrideDescription: tool.OverrideDescription,
-				Enabled:             tool.Enabled,
-			})
-		}
-
-		config.Components = append(config.Components, ComponentServer{
-			Name:        component.Name,
-			DisplayName: name,
-			URL:         system.LocalMCPConnectURL(component.Name, httpListenPort),
-			Tools:       tools,
-			ToolPrefix:  override.ToolPrefix,
-		})
-	}
-
-	for _, instance := range instances {
-		override := overrides[instance.Spec.MCPServerName]
-		if override.Disabled {
-			continue
-		}
-
-		tools := make([]types.ToolOverride, 0, len(override.ToolOverrides))
-		for _, tool := range override.ToolOverrides {
-			tools = append(tools, types.ToolOverride{
-				Name:                tool.Name,
-				OverrideName:        tool.OverrideName,
-				Description:         tool.Description,
-				OverrideDescription: tool.OverrideDescription,
-				Enabled:             tool.Enabled,
-			})
-		}
-
-		config.Components = append(config.Components, ComponentServer{
-			Name:        instance.Name,
-			DisplayName: instance.Name,
-			URL:         system.LocalMCPConnectURL(instance.Name, httpListenPort),
-			Tools:       tools,
-			ToolPrefix:  override.ToolPrefix,
-		})
-	}
-
-	slices.SortFunc(config.Components, func(a, b ComponentServer) int {
-		if a.DisplayName < b.DisplayName {
-			return -1
-		}
-		if a.DisplayName > b.DisplayName {
-			return 1
-		}
-		return 0
-	})
-
-	return config, missing, err
-}
-
 func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, scope, mcpCatalogName string, credEnv map[string]string) (ServerConfig, []string, error) {
-	if _, err := ValidateConfiguredOptions(mcpServer.Spec.Manifest.Env, remoteHeaders(mcpServer.Spec.Manifest.RemoteConfig), credEnv); err != nil {
+	fixedConfig := slices.DeleteFunc(slices.Clone(mcpServer.Spec.Manifest.Config), func(config types.MCPConfig) bool {
+		return config.UserAllowed
+	})
+	if _, err := ValidateConfiguredOptions(fixedConfig, credEnv); err != nil {
 		return ServerConfig{}, nil, err
 	}
 
 	// Catalog-managed literal values are static configuration, not user credentials.
 	// Make them available while expanding runtime arguments, but keep them separate
 	// from credEnv so they are never persisted or exposed as user-supplied secrets.
-	runtimeCredEnv := make(map[string]string, len(credEnv)+len(mcpServer.Spec.Manifest.Env))
+	runtimeCredEnv := make(map[string]string, len(credEnv)+len(mcpServer.Spec.Manifest.Config))
 	maps.Copy(runtimeCredEnv, credEnv)
-	for _, env := range mcpServer.Spec.Manifest.Env {
+	for _, env := range mcpServer.Spec.Manifest.Config {
+		if env.UserAllowed {
+			delete(runtimeCredEnv, env.Key)
+			continue
+		}
 		if env.Value != "" {
 			runtimeCredEnv[env.Key] = env.Value
 		}
 	}
 
 	fileEnvVars := make(map[string]struct{})
-	for _, file := range mcpServer.Spec.Manifest.Env {
-		if file.File {
+	for _, file := range mcpServer.Spec.Manifest.Config {
+		if file.Usage == types.File || file.Usage == types.DynamicFile {
 			fileEnvVars[file.Key] = struct{}{}
 		}
 	}
@@ -385,10 +308,9 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 	}
 
 	var passthroughHeaderNames []string
-	if mcpServer.Spec.Manifest.MultiUserConfig != nil && len(mcpServer.Spec.Manifest.MultiUserConfig.UserDefinedHeaders) > 0 {
-		passthroughHeaderNames = make([]string, len(mcpServer.Spec.Manifest.MultiUserConfig.UserDefinedHeaders))
-		for i, header := range mcpServer.Spec.Manifest.MultiUserConfig.UserDefinedHeaders {
-			passthroughHeaderNames[i] = header.Key
+	for _, header := range mcpServer.Spec.Manifest.Config {
+		if header.Usage == types.Header && header.UserAllowed {
+			passthroughHeaderNames = append(passthroughHeaderNames, header.Key)
 		}
 	}
 
@@ -398,7 +320,7 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 	}
 
 	serverConfig := ServerConfig{
-		Env:                    make([]string, 0, len(mcpServer.Spec.Manifest.Env)),
+		Env:                    make([]string, 0, len(mcpServer.Spec.Manifest.Config)),
 		UserID:                 userID,
 		OwnerUserID:            mcpServer.Spec.UserID,
 		Scope:                  fmt.Sprintf("%s-%s", mcpServer.Name, scope),
@@ -410,14 +332,14 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 		Runtime:                mcpServer.Spec.Manifest.Runtime,
 		Audiences:              audiences,
 		PassthroughHeaderNames: passthroughHeaderNames,
-		ComponentMCPServer:     mcpServer.Spec.CompositeName != "",
+		ComponentMCPServer:     mcpServer.Spec.VMCPComponentID != "",
 		AgentName:              mcpServer.Spec.NanobotAgentID,
 		StartupTimeout:         startupTimeout,
 		Resources:              resources,
 	}
 
-	if mcpServer.Spec.CompositeName == "" {
-		// Don't set these for component MCP servers. Audit logging is handled at the composite level for these.
+	if !serverConfig.ComponentMCPServer {
+		// Component requests are audited at the vMCP level.
 		serverConfig.AuditLogMetadata = map[string]string{
 			"mcpID":                     mcpServer.Name,
 			"mcpServerCatalogEntryName": mcpServer.Spec.MCPServerCatalogEntryName,
@@ -452,17 +374,18 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 		}
 	case types.RuntimeRemote:
 		var err error
-		missingRequiredNames, err = configureRemoteRuntime(&serverConfig, mcpServer.Spec.Manifest.RemoteConfig, credEnv)
+		missingRequiredNames, err = configureRemoteRuntime(&serverConfig, mcpServer.Spec.Manifest.RemoteConfig, mcpServer.Spec.Manifest.Config, runtimeCredEnv)
 		if err != nil {
 			return serverConfig, missingRequiredNames, err
 		}
-	case types.RuntimeComposite:
-		return serverConfig, missingRequiredNames, nil
 	default:
 		return serverConfig, missingRequiredNames, fmt.Errorf("unknown runtime %s", mcpServer.Spec.Manifest.Runtime)
 	}
 
-	for _, env := range mcpServer.Spec.Manifest.Env {
+	for _, env := range mcpServer.Spec.Manifest.Config {
+		if env.Usage == types.Header {
+			continue
+		}
 		val := env.Value
 		isStatic := val != ""
 		if !isStatic {
@@ -480,7 +403,10 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 			val = applyPrefix(val, env.Prefix)
 		}
 
-		if !env.File {
+		if env.Usage == types.Interpolated {
+			continue
+		}
+		if env.Usage != types.File && env.Usage != types.DynamicFile {
 			serverConfig.Env = append(serverConfig.Env, fmt.Sprintf("%s=%s", env.Key, val))
 			continue
 		}
@@ -488,7 +414,7 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 		serverConfig.Files = append(serverConfig.Files, File{
 			Data:    val,
 			EnvKey:  env.Key,
-			Dynamic: env.DynamicFile,
+			Dynamic: env.Usage == types.DynamicFile,
 		})
 	}
 
@@ -497,13 +423,22 @@ func ServerToServerConfig(mcpServer v1.MCPServer, audiences []string, userID, sc
 
 // SystemServerToServerConfig converts a v1.SystemMCPServer to a ServerConfig for deployment
 func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []string, userID string, credEnv map[string]string) (ServerConfig, []string, error) {
-	if _, err := ValidateConfiguredOptions(systemServer.Spec.Manifest.Env, remoteHeaders(systemServer.Spec.Manifest.RemoteConfig), credEnv); err != nil {
+	if _, err := ValidateConfiguredOptions(systemServer.Spec.Manifest.Config, credEnv); err != nil {
 		return ServerConfig{}, nil, err
+	}
+	credEnv = maps.Clone(credEnv)
+	if credEnv == nil {
+		credEnv = map[string]string{}
+	}
+	for _, config := range systemServer.Spec.Manifest.Config {
+		if config.Value != "" {
+			credEnv[config.Key] = config.Value
+		}
 	}
 
 	fileEnvVars := make(map[string]struct{})
-	for _, env := range systemServer.Spec.Manifest.Env {
-		if env.File {
+	for _, env := range systemServer.Spec.Manifest.Config {
+		if env.Usage == types.File || env.Usage == types.DynamicFile {
 			fileEnvVars[env.Key] = struct{}{}
 		}
 	}
@@ -525,7 +460,7 @@ func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []str
 	}
 
 	serverConfig := ServerConfig{
-		Env:                  make([]string, 0, len(systemServer.Spec.Manifest.Env)),
+		Env:                  make([]string, 0, len(systemServer.Spec.Manifest.Config)),
 		MCPServerNamespace:   systemServer.Namespace,
 		MCPServerName:        systemServer.Name,
 		MCPServerDisplayName: displayName,
@@ -561,7 +496,7 @@ func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []str
 		}
 	case types.RuntimeRemote:
 		var err error
-		missingRequiredNames, err = configureRemoteRuntime(&serverConfig, systemServer.Spec.Manifest.RemoteConfig, credEnv)
+		missingRequiredNames, err = configureRemoteRuntime(&serverConfig, systemServer.Spec.Manifest.RemoteConfig, systemServer.Spec.Manifest.Config, credEnv)
 		if err != nil {
 			return serverConfig, missingRequiredNames, err
 		}
@@ -570,7 +505,10 @@ func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []str
 	}
 
 	// Process environment variables
-	for _, env := range systemServer.Spec.Manifest.Env {
+	for _, env := range systemServer.Spec.Manifest.Config {
+		if env.Usage == types.Header {
+			continue
+		}
 		var (
 			val      string
 			hasValue bool
@@ -602,7 +540,10 @@ func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []str
 			val = applyPrefix(val, env.Prefix)
 		}
 
-		if !env.File {
+		if env.Usage == types.Interpolated {
+			continue
+		}
+		if env.Usage != types.File && env.Usage != types.DynamicFile {
 			serverConfig.Env = append(serverConfig.Env, fmt.Sprintf("%s=%s", env.Key, val))
 			continue
 		}
@@ -610,7 +551,7 @@ func SystemServerToServerConfig(systemServer v1.SystemMCPServer, audiences []str
 		serverConfig.Files = append(serverConfig.Files, File{
 			Data:    val,
 			EnvKey:  env.Key,
-			Dynamic: env.DynamicFile,
+			Dynamic: env.Usage == types.DynamicFile,
 		})
 	}
 

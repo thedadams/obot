@@ -130,7 +130,6 @@
 			!hasEditableConfiguration(server)
 	);
 	let canDebugOauth = $derived(canReauthenticate && profile.current?.hasAdminAccess?.());
-	let belongsToComposite = $derived(Boolean(server && server.compositeName));
 	let deprecated = $derived(isDeprecatedMCPServer(entry) || isDeprecatedMCPServer(server));
 	let configurableItem = $derived(server ?? entry);
 	// True when the user can manage the server deployment (restart, rename, edit config).
@@ -141,10 +140,7 @@
 			(server?.powerUserWorkspaceID && server?.userID === profile.current.id)
 	);
 	let canConfigure = $derived(
-		configurableItem &&
-			(configurableItem.manifest.runtime === 'composite' ||
-				hasEditableConfiguration(configurableItem)) &&
-			isServerOwner
+		configurableItem && hasEditableConfiguration(configurableItem) && isServerOwner
 	);
 	let canEditMultiUserServerConfiguration = $derived(
 		Boolean(
@@ -153,7 +149,9 @@
 			!readonly &&
 			allowMultiUserServerConfigurationEdit &&
 			instance &&
-			(server.manifest.multiUserConfig?.userDefinedHeaders?.length ?? 0) > 0
+			((server.manifest.config ?? []).filter(
+				(field) => field.usage === 'header' && field.userAllowed
+			)?.length ?? 0) > 0
 		)
 	);
 	let canDeleteMultiUserServer = $derived(
@@ -237,8 +235,7 @@
 			: !requiresStaticOAuth || entry?.oauthCredentialConfigured
 	);
 	let showConnectButton = $derived(
-		!belongsToComposite &&
-			!hideActions &&
+		!hideActions &&
 			Boolean(
 				(entry && !server) ||
 				(server &&
@@ -327,7 +324,7 @@
 </script>
 
 <!-- Use class:hidden to avoid Svelte 5 production build with conditional DOM cleanup -->
-<div class="contents" class:hidden={belongsToComposite || hideActions}>
+<div class="contents" class:hidden={hideActions}>
 	<button
 		class="btn btn-primary flex w-full items-center gap-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 md:w-fit"
 		class:hidden={!showConnectButton}

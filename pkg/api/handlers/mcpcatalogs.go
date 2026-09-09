@@ -23,7 +23,7 @@ import (
 	"github.com/obot-platform/obot/pkg/system"
 	"github.com/obot-platform/obot/pkg/tunnel"
 	"github.com/obot-platform/obot/pkg/utils"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	vmcpconfig "github.com/obot-platform/obot/pkg/vmcp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -326,15 +326,6 @@ func (h *MCPCatalogHandler) CreateEntry(req api.Context) error {
 	if err := req.Read(&manifest); err != nil {
 		return types.NewErrBadRequest("failed to read entry manifest: %v", err)
 	}
-	if manifest.ServerUserType == "" {
-		manifest.ServerUserType = types.ServerUserTypeSingleUser
-	}
-	// Handle composite catalog entries
-	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
-		if err := h.populateComponentManifests(req, &manifest, catalogName, workspaceID); err != nil {
-			return err
-		}
-	}
 	if err := validateCatalogEntryManifestWithResourceMaximums(req, manifest, false, h.sessionManager); err != nil {
 		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
 	}
@@ -411,20 +402,6 @@ func (h *MCPCatalogHandler) UpdateEntry(req api.Context) error {
 	var manifest types.MCPServerCatalogEntryManifest
 	if err := req.Read(&manifest); err != nil {
 		return types.NewErrBadRequest("failed to read entry manifest: %v", err)
-	}
-
-	if manifest.ServerUserType == "" {
-		manifest.ServerUserType = types.ServerUserTypeSingleUser
-	}
-
-	// Component manifests are snapshots of their referenced entries and must not
-	// be accepted from the request. Besides keeping updates consistent with
-	// creation, this prevents a component from combining another entry's ID (and
-	// static OAuth credentials) with attacker-controlled connection metadata.
-	if manifest.Runtime == types.RuntimeComposite && manifest.CompositeConfig != nil {
-		if err := h.populateComponentManifests(req, &manifest, catalogName, workspaceID); err != nil {
-			return err
-		}
 	}
 
 	if err := validateCatalogEntryManifestWithResourceMaximums(req, manifest, false, h.sessionManager); err != nil {
@@ -575,7 +552,7 @@ func (h *MCPCatalogHandler) AdminListServersForEntryInCatalog(req api.Context) e
 			return fmt.Errorf("failed to find credential: %w", err)
 		}
 
-		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Env, server.Spec.Manifest.RemoteConfig, cred.Secrets, h.secretBindingAllowedLabel)
+		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Config, cred.Secrets, h.secretBindingAllowedLabel)
 		if err != nil {
 			return fmt.Errorf("failed to resolve secret bindings: %w", err)
 		}
@@ -585,14 +562,7 @@ func (h *MCPCatalogHandler) AdminListServersForEntryInCatalog(req api.Context) e
 			return fmt.Errorf("failed to generate slug: %w", err)
 		}
 
-		var components []types.MCPServer
-		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
-			components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
-			if err != nil {
-				return err
-			}
-		}
-		items = append(items, ConvertMCPServer(server, mergedEnv, h.serverURL, slug, components...))
+		items = append(items, ConvertMCPServer(server, mergedEnv, h.serverURL, slug))
 	}
 
 	return req.Write(types.MCPServerList{Items: items})
@@ -708,7 +678,7 @@ func (h *MCPCatalogHandler) AdminListServersForAllEntriesInCatalog(req api.Conte
 			return fmt.Errorf("failed to find credential: %w", err)
 		}
 
-		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Env, server.Spec.Manifest.RemoteConfig, cred.Secrets, h.secretBindingAllowedLabel)
+		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Config, cred.Secrets, h.secretBindingAllowedLabel)
 		if err != nil {
 			return fmt.Errorf("failed to resolve secret bindings: %w", err)
 		}
@@ -718,14 +688,7 @@ func (h *MCPCatalogHandler) AdminListServersForAllEntriesInCatalog(req api.Conte
 			return fmt.Errorf("failed to generate slug: %w", err)
 		}
 
-		var components []types.MCPServer
-		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
-			components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
-			if err != nil {
-				return err
-			}
-		}
-		items = append(items, ConvertMCPServer(server, mergedEnv, h.serverURL, slug, components...))
+		items = append(items, ConvertMCPServer(server, mergedEnv, h.serverURL, slug))
 	}
 
 	return req.Write(types.MCPServerList{Items: items})
@@ -786,7 +749,7 @@ func (h *MCPCatalogHandler) ListServersForEntry(req api.Context) error {
 			return fmt.Errorf("failed to find credential: %w", err)
 		}
 
-		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Env, server.Spec.Manifest.RemoteConfig, cred.Secrets, h.secretBindingAllowedLabel)
+		mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Config, cred.Secrets, h.secretBindingAllowedLabel)
 		if err != nil {
 			return fmt.Errorf("failed to resolve secret bindings: %w", err)
 		}
@@ -796,14 +759,7 @@ func (h *MCPCatalogHandler) ListServersForEntry(req api.Context) error {
 			return fmt.Errorf("failed to generate slug: %w", err)
 		}
 
-		var components []types.MCPServer
-		if server.Spec.Manifest.Runtime == types.RuntimeComposite {
-			components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
-			if err != nil {
-				return fmt.Errorf("failed to resolve composite components: %w", err)
-			}
-		}
-		items = append(items, ConvertMCPServer(server, mergedEnv, h.serverURL, slug, components...))
+		items = append(items, ConvertMCPServer(server, mergedEnv, h.serverURL, slug))
 	}
 
 	return req.Write(types.MCPServerList{Items: items})
@@ -855,7 +811,7 @@ func (h *MCPCatalogHandler) GetServerFromEntry(req api.Context) error {
 		return fmt.Errorf("failed to find credential: %w", err)
 	}
 
-	mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Env, server.Spec.Manifest.RemoteConfig, cred.Secrets, h.secretBindingAllowedLabel)
+	mergedEnv, err := mcp.MergeBoundCreds(req.Context(), req.LocalK8sClient, req.ObotNamespace, server.Spec.Manifest.Config, cred.Secrets, h.secretBindingAllowedLabel)
 	if err != nil {
 		return fmt.Errorf("failed to resolve secret bindings: %w", err)
 	}
@@ -865,15 +821,7 @@ func (h *MCPCatalogHandler) GetServerFromEntry(req api.Context) error {
 		return fmt.Errorf("failed to generate slug: %w", err)
 	}
 
-	var components []types.MCPServer
-	if server.Spec.Manifest.Runtime == types.RuntimeComposite {
-		components, err = resolveCompositeComponents(req, server, h.secretBindingAllowedLabel)
-		if err != nil {
-			slog.Warn("failed to resolve composite components for catalog server", "serverName", server.Name, "error", err)
-			return err
-		}
-	}
-	return req.Write(ConvertMCPServer(server, mergedEnv, h.serverURL, slug, components...))
+	return req.Write(ConvertMCPServer(server, mergedEnv, h.serverURL, slug))
 }
 
 // GenerateToolPreviews launches a temporary instance of an MCP server from a catalog entry
@@ -884,7 +832,7 @@ func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
 		workspaceID = req.PathValue("workspace_id")
 		entryName   = req.PathValue("entry_id")
 		// "dryRun" lets us get the previews for an MCP server without updating its CatalogEntry.
-		// This is used when we populate the tools for individual MCP servers when creating a composite CatalogEntry
+		// This is used when we populate the tools for individual MCP servers when configuring a vMCP
 		// (configuring tool overrides).
 		dryRun = req.Request.URL.Query().Get("dryRun") == "true"
 	)
@@ -916,7 +864,7 @@ func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
 	}
 
 	if entry.Spec.Manifest.Runtime == types.RuntimeComposite {
-		return h.generateCompositeToolPreviews(req, entry, dryRun)
+		return types.NewErrBadRequest("composite catalog entries are no longer supported")
 	}
 
 	// Read configuration from request body
@@ -996,149 +944,13 @@ func (h *MCPCatalogHandler) GenerateToolPreviews(req api.Context) error {
 	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
 }
 
-func (h *MCPCatalogHandler) generateCompositeToolPreviews(req api.Context, entry v1.MCPServerCatalogEntry, dryRun bool) error {
-	// Read configuration from request body
-	var configRequest struct {
-		ComponentConfigs map[string]struct {
-			Config   map[string]string `json:"config"`
-			URL      string            `json:"url"`
-			Disabled bool              `json:"disabled"`
-		} `json:"componentConfigs"`
-	}
-	if err := req.Read(&configRequest); err != nil {
-		return types.NewErrBadRequest("failed to read configuration: %v", err)
-	}
-
-	compositeConfig := entry.Spec.Manifest.CompositeConfig
-	if compositeConfig == nil {
-		return types.NewErrBadRequest("composite configuration is required")
-	}
-
-	catalogName := entry.Spec.MCPCatalogName
-	if catalogName == "" {
-		catalogName = entry.Spec.PowerUserWorkspaceID
-	}
-	validationOptions, err := ValidationOptionsWithResourceMaximums(req, h.sessionManager)
-	if err != nil {
-		return err
-	}
-
-	compositeToolPreviews := make([]types.MCPServerTool, 0, len(compositeConfig.ComponentServers))
-	for _, componentEntry := range compositeConfig.ComponentServers {
-		// If this component references an existing MCPServer, list its tools directly
-		// (as we do for multi-user servers) instead of creating a temporary server.
-		if componentEntry.MCPServerID != "" {
-			var mcpServer v1.MCPServer
-			if err := req.Get(&mcpServer, componentEntry.MCPServerID); err != nil {
-				return fmt.Errorf("failed to get MCP server %q: %w", componentEntry.MCPServerID, err)
-			}
-
-			_, serverConfig, err := h.sessionManager.ServerForAction(req.Context(), mcpServer.Name, req.User.GetUID())
-			if err != nil {
-				return fmt.Errorf("failed to build server configuration for MCP server %q: %w", mcpServer.Name, err)
-			}
-
-			tools, err := toolsForServer(req.Context(), h.sessionManager, mcpServer, serverConfig)
-			if err != nil {
-				return fmt.Errorf("failed to list tools for MCP server %q: %w", mcpServer.Name, err)
-			}
-
-			transformedTools := mcp.ApplyToolOverrides(tools, componentEntry.ToolOverrides, componentEntry.ToolPrefix)
-			compositeToolPreviews = append(compositeToolPreviews, transformedTools...)
-			continue
-		}
-
-		// CatalogEntry-based components still use a temporary server with the supplied config.
-		config, ok := configRequest.ComponentConfigs[componentEntry.ComponentID()]
-		if !ok {
-			// No config provided for this component, skip it
-			continue
-		}
-
-		// Skip disabled components when generating composite tool previews
-		if config.Disabled {
-			continue
-		}
-
-		server, serverConfig, err := tempServerAndConfig(
-			req.Context(),
-			req.Storage,
-			req.LocalK8sClient,
-			req.ObotNamespace,
-			h.secretBindingAllowedLabel,
-			componentEntry.CatalogEntryID,
-			catalogName,
-			componentEntry.Manifest,
-			config.Config,
-			config.URL,
-			h.serverURL,
-			validationOptions,
-		)
-		if err != nil {
-			return err
-		}
-
-		if serverConfig.Runtime == types.RuntimeRemote {
-			oauthURL, err := h.oauthChecker.CheckForMCPAuth(
-				req,
-				server,
-				serverConfig,
-				"system",
-				server.Name,
-				"",
-			)
-			if err != nil {
-				return fmt.Errorf("failed to check for MCP auth: %w", err)
-			}
-
-			if oauthURL != "" {
-				return types.NewErrBadRequest("MCP server requires OAuth authentication")
-			}
-
-			defer func() {
-				_ = h.gatewayClient.DeleteMCPOAuthTokens(context.Background(), "system", server.Name)
-			}()
-		}
-
-		toolPreview, err := h.sessionManager.GenerateToolPreviews(req.Context(), server, serverConfig)
-		if err != nil {
-			return fmt.Errorf("failed to generate tool preview: %w", err)
-		}
-
-		// Apply tool overrides before aggregating
-		transformedTools := mcp.ApplyToolOverrides(toolPreview, componentEntry.ToolOverrides, componentEntry.ToolPrefix)
-
-		compositeToolPreviews = append(compositeToolPreviews, transformedTools...)
-	}
-
-	// Set the tool preview on the catalog entry
-	entry.Spec.Manifest.ToolPreview = compositeToolPreviews
-	if dryRun {
-		// Don't update the entry, just return the entry with the new tool set
-		return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
-	}
-
-	if err := req.Update(&entry); err != nil {
-		return fmt.Errorf("failed to update catalog entry: %w", err)
-	}
-
-	now := metav1.Now()
-	entry.Status.ToolPreviewsLastGenerated = &now
-	if err := req.Storage.Status().Update(req.Context(), &entry); err != nil {
-		return fmt.Errorf("failed to update catalog entry: %w", err)
-	}
-
-	// Return the updated catalog entry
-	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
-}
-
 func (h *MCPCatalogHandler) GenerateToolPreviewsOAuthURL(req api.Context) error {
 	var (
 		catalogName = req.PathValue("catalog_id")
 		workspaceID = req.PathValue("workspace_id")
 		entryName   = req.PathValue("entry_id")
 		// "dryRun" lets us get the previews for an MCP server without updating its CatalogEntry.
-		// This is used when we populate the tools for individual MCP servers when creating a composite CatalogEntry
+		// This is used when we populate the tools for individual MCP servers when configuring a vMCP
 		// (configuring tool overrides).
 		dryRun = req.Request.URL.Query().Get("dryRun") == "true"
 	)
@@ -1170,9 +982,8 @@ func (h *MCPCatalogHandler) GenerateToolPreviewsOAuthURL(req api.Context) error 
 		return types.NewErrBadRequest("entry is not editable")
 	}
 
-	// Handle composite servers
 	if entry.Spec.Manifest.Runtime == types.RuntimeComposite {
-		return h.generateCompositeOAuthURLs(req, entry)
+		return types.NewErrBadRequest("composite catalog entries are no longer supported")
 	}
 
 	if entry.Spec.Manifest.Runtime != types.RuntimeRemote {
@@ -1209,98 +1020,14 @@ func (h *MCPCatalogHandler) GenerateToolPreviewsOAuthURL(req api.Context) error 
 	return req.Write(map[string]string{"oauthURL": oauthURL})
 }
 
-// GenerateComponentToolPreviews generates tool previews for a single component of a composite
-// catalog entry using the manifest snapshot embedded in the composite entry. This is used by
-// the composite \"Configure Tools\" flow so that previews are based on the composite's
-// stored manifest, not on any newer version of the standalone MCP catalog entry.
-func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error {
-	var (
-		catalogName = req.PathValue("catalog_id")
-		compositeID = req.PathValue("entry_id")
-		componentID = req.PathValue("component_id")
-	)
-
-	if catalogName == "" {
-		return types.NewErrBadRequest("catalog_id is required")
-	}
-
-	// Verify catalog exists
-	if err := req.Get(&v1.MCPCatalog{}, catalogName); err != nil {
-		return fmt.Errorf("failed to get catalog: %w", err)
-	}
-
-	// Load the composite catalog entry
-	var composite v1.MCPServerCatalogEntry
-	if err := req.Get(&composite, compositeID); err != nil {
-		return fmt.Errorf("failed to get composite catalog entry: %w", err)
-	}
-
-	if composite.Spec.MCPCatalogName != catalogName {
-		return types.NewErrBadRequest("entry does not belong to catalog")
-	}
-
-	if composite.Spec.Manifest.Runtime != types.RuntimeComposite {
-		return types.NewErrBadRequest("entry is not a composite catalog entry")
-	}
-
-	if composite.Spec.Manifest.CompositeConfig == nil {
-		return types.NewErrBadRequest("composite entry has no component configuration")
-	}
-
-	// Find the referenced component in the composite's configuration.
-	var component *types.CatalogComponentServer
-	for i := range composite.Spec.Manifest.CompositeConfig.ComponentServers {
-		c := &composite.Spec.Manifest.CompositeConfig.ComponentServers[i]
-		if c.CatalogEntryID == componentID {
-			component = c
-			break
-		}
-	}
-
-	if component == nil {
-		return types.NewErrBadRequest("component not found in composite entry")
-	}
-
-	// Multi-user components use the multi-user tools API and should not call this endpoint.
-	if component.MCPServerID != "" {
-		return types.NewErrBadRequest("multi-user server components are not supported by this endpoint")
-	}
-
-	// Read configuration from request body
-	var configRequest struct {
-		Config map[string]string `json:"config"`
-		URL    string            `json:"url"`
-	}
-	if err := req.Read(&configRequest); err != nil {
-		return types.NewErrBadRequest("failed to read configuration: %v", err)
-	}
-
-	catalogName = composite.Spec.MCPCatalogName
-	if catalogName == "" {
-		catalogName = composite.Spec.PowerUserWorkspaceID
-	}
-	validationOptions, err := ValidationOptionsWithResourceMaximums(req, h.sessionManager)
+// GenerateVMCPComponentToolPreviews generates tool previews for a vMCP
+// component using the manifest snapshot stored on the vMCP. The source
+// catalog entry is intentionally not consulted: a vMCP component is a
+// deployed snapshot and preview generation must use the same definition.
+func (h *MCPCatalogHandler) GenerateVMCPComponentToolPreviews(req api.Context) error {
+	vmcp, component, server, serverConfig, err := h.vmcpComponentToolPreviewConfig(req)
 	if err != nil {
 		return err
-	}
-
-	// Use the manifest snapshot embedded in the composite entry for this component.
-	server, serverConfig, err := tempServerAndConfig(
-		req.Context(),
-		req.Storage,
-		req.LocalK8sClient,
-		req.ObotNamespace,
-		h.secretBindingAllowedLabel,
-		component.CatalogEntryID,
-		catalogName,
-		component.Manifest,
-		configRequest.Config,
-		configRequest.URL,
-		h.serverURL,
-		validationOptions,
-	)
-	if err != nil {
-		return types.NewErrBadRequest("failed to create temporary server and config: %v", err)
 	}
 
 	if serverConfig.Runtime == types.RuntimeRemote {
@@ -1308,14 +1035,14 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		if err != nil {
 			return fmt.Errorf("failed to check for MCP auth: %w", err)
 		}
-
 		if oauthURL != "" {
 			return types.NewErrBadRequest("MCP server requires OAuth authentication")
 		}
-
-		defer func() {
-			_ = h.gatewayClient.DeleteMCPOAuthTokens(context.Background(), "system", server.Name)
-		}()
+		if h.gatewayClient != nil {
+			defer func() {
+				_ = h.gatewayClient.DeleteMCPOAuthTokens(context.Background(), "system", server.Name)
+			}()
+		}
 	}
 
 	toolPreviews, err := h.sessionManager.GenerateToolPreviews(req.Context(), server, serverConfig)
@@ -1323,113 +1050,16 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviews(req api.Context) error
 		return fmt.Errorf("failed to generate tool preview: %w", err)
 	}
 
-	// Return the tool previews on a skeleton entry
-	// We don't bother adding these to the real entry because:
-	// - it may no longer exist
-	// - we already have enough information to generate composite tool overrides for the component
-	entry := v1.MCPServerCatalogEntry{
-		Name:      component.CatalogEntryID,
-		Namespace: composite.Namespace,
-		Spec: v1.MCPServerCatalogEntrySpec{
-			MCPCatalogName: composite.Spec.MCPCatalogName,
-			Manifest:       component.Manifest,
-		},
-	}
-	entry.Spec.Manifest.ToolPreview = toolPreviews
-
-	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
+	return h.writeVMCPComponentToolPreview(req, vmcp, component, toolPreviews)
 }
 
-// GenerateComponentToolPreviewsOAuthURL returns an OAuth URL for a single component of a
-// composite catalog entry, using the component manifest snapshot embedded in the composite.
-func (h *MCPCatalogHandler) GenerateComponentToolPreviewsOAuthURL(req api.Context) error {
-	var (
-		catalogName = req.PathValue("catalog_id")
-		compositeID = req.PathValue("entry_id")
-		componentID = req.PathValue("component_id")
-	)
-
-	if catalogName == "" {
-		return types.NewErrBadRequest("catalog_id is required")
-	}
-
-	// Verify catalog exists
-	if err := req.Get(&v1.MCPCatalog{}, catalogName); err != nil {
-		return fmt.Errorf("failed to get catalog: %w", err)
-	}
-
-	// Load the composite catalog entry
-	var composite v1.MCPServerCatalogEntry
-	if err := req.Get(&composite, compositeID); err != nil {
-		return fmt.Errorf("failed to get composite catalog entry: %w", err)
-	}
-
-	if composite.Spec.MCPCatalogName != catalogName {
-		return types.NewErrBadRequest("entry does not belong to catalog")
-	}
-
-	if composite.Spec.Manifest.Runtime != types.RuntimeComposite {
-		return types.NewErrBadRequest("entry is not a composite catalog entry")
-	}
-
-	if composite.Spec.Manifest.CompositeConfig == nil {
-		return types.NewErrBadRequest("composite entry has no component configuration")
-	}
-
-	// Find the referenced component in the composite's configuration.
-	var component *types.CatalogComponentServer
-	for i := range composite.Spec.Manifest.CompositeConfig.ComponentServers {
-		c := &composite.Spec.Manifest.CompositeConfig.ComponentServers[i]
-		if c.CatalogEntryID == componentID {
-			component = c
-			break
-		}
-	}
-
-	if component == nil {
-		return types.NewErrBadRequest("component not found in composite entry")
-	}
-
-	if component.MCPServerID != "" {
-		return types.NewErrBadRequest("multi-user server components are not supported by this endpoint")
-	}
-
-	// Read configuration from request body
-	var configRequest struct {
-		Config map[string]string `json:"config"`
-		URL    string            `json:"url"`
-	}
-	if err := req.Read(&configRequest); err != nil {
-		return types.NewErrBadRequest("failed to read configuration: %v", err)
-	}
-
-	catalogName = composite.Spec.MCPCatalogName
-	if catalogName == "" {
-		catalogName = composite.Spec.PowerUserWorkspaceID
-	}
-	validationOptions, err := ValidationOptionsWithResourceMaximums(req, h.sessionManager)
+// GenerateVMCPComponentToolPreviewsOAuthURL returns the OAuth URL, if any,
+// needed to generate previews for a vMCP component.
+func (h *MCPCatalogHandler) GenerateVMCPComponentToolPreviewsOAuthURL(req api.Context) error {
+	_, _, server, serverConfig, err := h.vmcpComponentToolPreviewConfig(req)
 	if err != nil {
 		return err
 	}
-
-	server, serverConfig, err := tempServerAndConfig(
-		req.Context(),
-		req.Storage,
-		req.LocalK8sClient,
-		req.ObotNamespace,
-		h.secretBindingAllowedLabel,
-		component.CatalogEntryID,
-		catalogName,
-		component.Manifest,
-		configRequest.Config,
-		configRequest.URL,
-		h.serverURL,
-		validationOptions,
-	)
-	if err != nil {
-		return types.NewErrBadRequest("failed to create temporary server and config: %v", err)
-	}
-
 	if serverConfig.Runtime != types.RuntimeRemote {
 		return req.Write(map[string]string{"oauthURL": ""})
 	}
@@ -1438,101 +1068,135 @@ func (h *MCPCatalogHandler) GenerateComponentToolPreviewsOAuthURL(req api.Contex
 	if err != nil {
 		return types.NewErrBadRequest("failed to check for MCP auth: %v", err)
 	}
-
 	return req.Write(map[string]string{"oauthURL": oauthURL})
 }
 
-func (h *MCPCatalogHandler) generateCompositeOAuthURLs(req api.Context, entry v1.MCPServerCatalogEntry) error {
-	// Read configuration from request body (same as generateCompositeToolPreviews)
-	var configRequest struct {
-		ComponentConfigs map[string]struct {
-			Config   map[string]string `json:"config"`
-			URL      string            `json:"url"`
-			Disabled bool              `json:"disabled"`
-		} `json:"componentConfigs"`
-	}
-	if err := req.Read(&configRequest); err != nil {
-		return types.NewErrBadRequest("failed to read configuration: %v", err)
+// vmcpComponentToolPreviewConfig builds the temporary server used by both
+// vMCP component preview endpoints. Only fixed configuration from the vMCP's
+// VMCP-scoped credential is used; callers cannot override vMCP policy by
+// posting arbitrary configuration to this endpoint.
+func (h *MCPCatalogHandler) vmcpComponentToolPreviewConfig(req api.Context) (v1.VMCP, types.VMCPComponent, v1.MCPServer, mcp.ServerConfig, error) {
+	var vmcp v1.VMCP
+	if err := req.Get(&vmcp, req.PathValue("vmcp_id")); err != nil {
+		return vmcp, types.VMCPComponent{}, v1.MCPServer{}, mcp.ServerConfig{}, fmt.Errorf("failed to get vMCP: %w", err)
 	}
 
-	compositeConfig := entry.Spec.Manifest.CompositeConfig
-	if compositeConfig == nil {
-		return types.NewErrBadRequest("composite configuration is required")
+	componentID := req.PathValue("component_id")
+	var component *types.VMCPComponent
+	for index := range vmcp.Spec.Manifest.Components {
+		candidate := &vmcp.Spec.Manifest.Components[index]
+		if candidate.ID == componentID || (candidate.ID == "" && candidate.MCPServerCatalogEntryID == componentID) {
+			component = candidate
+			break
+		}
+	}
+	if component == nil {
+		return vmcp, types.VMCPComponent{}, v1.MCPServer{}, mcp.ServerConfig{}, types.NewErrNotFound("vMCP component not found")
 	}
 
-	// Collect OAuth URLs for each component
-	oauthURLs := make(map[string]string)
+	manifest := component.CatalogEntry.Manifest.DeepCopy()
+	if manifest == nil {
+		return vmcp, *component, v1.MCPServer{}, mcp.ServerConfig{}, types.NewErrBadRequest("vMCP component has no catalog-entry snapshot")
+	}
 
-	catalogName := entry.Spec.MCPCatalogName
-	if catalogName == "" {
-		catalogName = entry.Spec.PowerUserWorkspaceID
+	staticConfiguration, err := h.vmcpStaticConfiguration(req, vmcp.Name, *component)
+	if err != nil {
+		return vmcp, *component, v1.MCPServer{}, mcp.ServerConfig{}, err
 	}
 	validationOptions, err := ValidationOptionsWithResourceMaximums(req, h.sessionManager)
 	if err != nil {
-		return err
+		return vmcp, *component, v1.MCPServer{}, mcp.ServerConfig{}, err
+	}
+	catalogName := component.MCPCatalogID
+	server, serverConfig, err := tempServerAndConfig(
+		req.Context(),
+		req.Storage,
+		req.LocalK8sClient,
+		req.ObotNamespace,
+		h.secretBindingAllowedLabel,
+		component.MCPServerCatalogEntryID,
+		catalogName,
+		*manifest,
+		staticConfiguration,
+		"",
+		h.serverURL,
+		validationOptions,
+	)
+	if err != nil {
+		return vmcp, *component, v1.MCPServer{}, mcp.ServerConfig{}, types.NewErrBadRequest("failed to create temporary server and config: %v", err)
 	}
 
-	for _, componentEntry := range compositeConfig.ComponentServers {
-		if componentEntry.MCPServerID != "" {
-			// Skip multi-user server components when checking for OAuth URLs
-			continue
-		}
+	// GenerateToolPreviews uses the system OAuth identity. Include the
+	// requester and vMCP component in the temporary server name so concurrent
+	// preview requests never share OAuth state or a runtime.
+	tempName := "vmcp-tool-preview-" + utils.Digest(struct {
+		VMCPID              string
+		ComponentID         string
+		UserID              string
+		SnapshotDigest      string
+		ConfigurationDigest string
+	}{
+		VMCPID:              vmcp.Name,
+		ComponentID:         component.ID,
+		UserID:              req.User.GetUID(),
+		SnapshotDigest:      utils.Digest(*manifest),
+		ConfigurationDigest: utils.Digest(staticConfiguration),
+	})[:16]
+	server.Name = tempName
+	serverConfig.MCPServerName = tempName
 
-		componentID := componentEntry.CatalogEntryID
-		if componentID == "" {
-			componentID = componentEntry.MCPServerID
-		}
+	return vmcp, *component, server, serverConfig, nil
+}
 
-		config, ok := configRequest.ComponentConfigs[componentID]
-		if !ok {
-			// No config provided for this component, skip
-			continue
-		}
-
-		// Skip disabled components when generating OAuth URLs
-		if config.Disabled {
-			continue
-		}
-
-		// Only check OAuth for remote components
-		if componentEntry.Manifest.Runtime != types.RuntimeRemote {
-			delete(oauthURLs, componentID)
-			continue
-		}
-
-		server, serverConfig, err := tempServerAndConfig(
-			req.Context(),
-			req.Storage,
-			req.LocalK8sClient,
-			req.ObotNamespace,
-			h.secretBindingAllowedLabel,
-			componentEntry.CatalogEntryID,
-			catalogName,
-			componentEntry.Manifest,
-			config.Config,
-			config.URL,
-			h.serverURL,
-			validationOptions,
-		)
-		if err != nil {
-			// If we can't create server config, skip this component
-			delete(oauthURLs, componentID)
-			continue
-		}
-
-		// Check if OAuth is required
-		oauthURL, err := h.oauthChecker.CheckForMCPAuth(req, server, serverConfig, "system", server.Name, "")
-		if err != nil || oauthURL == "" {
-			// On error, assume no OAuth needed
-			delete(oauthURLs, componentID)
-			continue
-		}
-
-		oauthURLs[componentID] = oauthURL
+func (h *MCPCatalogHandler) vmcpStaticConfiguration(req api.Context, vmcpID string, component types.VMCPComponent) (map[string]string, error) {
+	configuration := map[string]string{}
+	if h.gatewayClient == nil {
+		return nil, fmt.Errorf("gateway client is not configured")
 	}
+	credential, err := h.gatewayClient.RevealCredential(
+		req.Context(),
+		[]string{vmcpconfig.StaticConfigurationCredentialContext(vmcpID)},
+		vmcpconfig.ConfigurationCredentialName(),
+	)
+	if err != nil {
+		if errors.As(err, &gclient.CredentialNotFoundError{}) {
+			return configuration, nil
+		}
+		return nil, fmt.Errorf("failed to reveal vMCP static configuration: %w", err)
+	}
+	fixedKeys := make(map[string]struct{}, len(component.Configuration))
+	for _, policy := range component.Configuration {
+		if policy.Policy == types.VMCPConfigurationPolicyFixed {
+			fixedKeys[policy.Key] = struct{}{}
+		}
+	}
+	for key, value := range credential.Secrets {
+		keyComponentID, configurationKey, ok := vmcpconfig.ParseConfigurationKey(key)
+		if ok && keyComponentID == component.ID {
+			if _, isFixed := fixedKeys[configurationKey]; !isFixed {
+				continue
+			}
+			configuration[configurationKey] = value
+		}
+	}
+	return configuration, nil
+}
 
-	// Return map of component IDs to OAuth URLs
-	return req.Write(oauthURLs)
+func (h *MCPCatalogHandler) writeVMCPComponentToolPreview(req api.Context, vmcp v1.VMCP, component types.VMCPComponent, toolPreviews []types.MCPServerTool) error {
+	manifest := component.CatalogEntry.Manifest.DeepCopy()
+	if manifest == nil {
+		return types.NewErrBadRequest("vMCP component has no catalog-entry snapshot")
+	}
+	manifest.ToolPreview = toolPreviews
+	entry := v1.MCPServerCatalogEntry{
+		Name:      component.MCPServerCatalogEntryID,
+		Namespace: vmcp.Namespace,
+		Spec: v1.MCPServerCatalogEntrySpec{
+			MCPCatalogName: component.MCPCatalogID,
+			Manifest:       *manifest,
+		},
+	}
+	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
 }
 
 func tempServerAndConfig(ctx context.Context, client kclient.Client, localK8sClient kclient.Client, obotNamespace, secretBindingAllowedLabel, entryName, catalogName string, entryManifest types.MCPServerCatalogEntryManifest, config map[string]string, url, baseURL string, validationOptions mcp.ValidationOptions) (v1.MCPServer, mcp.ServerConfig, error) {
@@ -1542,7 +1206,7 @@ func tempServerAndConfig(ctx context.Context, client kclient.Client, localK8sCli
 		return v1.MCPServer{}, mcp.ServerConfig{}, fmt.Errorf("failed to convert catalog entry to server config: %w", err)
 	}
 
-	config, err = prepareTempServerConfig(ctx, localK8sClient, obotNamespace, secretBindingAllowedLabel, &serverManifest, config, !entryManifest.ServerUserType.IsSingleUser(), validationOptions)
+	config, err = prepareTempServerConfig(ctx, localK8sClient, obotNamespace, secretBindingAllowedLabel, &serverManifest, config, false, validationOptions)
 	if err != nil {
 		return v1.MCPServer{}, mcp.ServerConfig{}, err
 	}
@@ -1568,12 +1232,16 @@ func tempServerAndConfig(ctx context.Context, client kclient.Client, localK8sCli
 	if len(missingFields) > 0 {
 		return v1.MCPServer{}, mcp.ServerConfig{}, types.NewErrBadRequest("missing required configuration fields: %v", missingFields)
 	}
+	if serverConfig.AuditLogMetadata == nil {
+		serverConfig.AuditLogMetadata = map[string]string{}
+	}
+	serverConfig.AuditLogMetadata[mcp.AuditLogIgnore] = "true"
 
 	return tempMCPServer, serverConfig, nil
 }
 
 func prepareTempServerConfig(ctx context.Context, localK8sClient kclient.Client, obotNamespace, secretBindingAllowedLabel string, serverManifest *types.MCPServerManifest, config map[string]string, isMultiUser bool, validationOptions mcp.ValidationOptions) (map[string]string, error) {
-	if err := validateConfiguredOptions(serverManifest.Env, serverManifest.RemoteConfig, config); err != nil {
+	if err := validateConfiguredOptions(serverManifest.Config, config); err != nil {
 		return nil, types.NewErrBadRequest("invalid configuration: %v", err)
 	}
 	// Render templates before resolving bindings so Secret values can only be
@@ -1585,7 +1253,7 @@ func prepareTempServerConfig(ctx context.Context, localK8sClient kclient.Client,
 		return nil, err
 	}
 
-	mergedConfig, err := mcp.MergeBoundCreds(ctx, localK8sClient, obotNamespace, serverManifest.Env, serverManifest.RemoteConfig, config, secretBindingAllowedLabel)
+	mergedConfig, err := mcp.MergeBoundCreds(ctx, localK8sClient, obotNamespace, serverManifest.Config, config, secretBindingAllowedLabel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve secret bindings: %w", err)
 	}
@@ -1671,151 +1339,6 @@ func normalizeMCPCatalogEntryName(name string) string {
 		name = strings.TrimRight(name, "-")
 	}
 	return name
-}
-
-func (h *MCPCatalogHandler) populateComponentManifests(req api.Context, manifest *types.MCPServerCatalogEntryManifest, catalogName, workspaceID string) error {
-	// For each component server, fetch its catalog entry and populate the manifest
-	var componentServers []types.CatalogComponentServer
-	for i := range manifest.CompositeConfig.ComponentServers {
-		var (
-			component                    = &manifest.CompositeConfig.ComponentServers[i]
-			hasCatalogEntry, hasServerID = component.CatalogEntryID != "", component.MCPServerID != ""
-		)
-		// Validate that exactly one of CatalogEntryID or MCPServerID is set
-		if hasCatalogEntry && hasServerID {
-			return types.NewErrBadRequest("component cannot have both catalogEntryID and mcpServerID set")
-		}
-		if !hasCatalogEntry && !hasServerID {
-			return types.NewErrBadRequest("component must have either catalogEntryID or mcpServerID set")
-		}
-
-		if component.MCPServerID != "" {
-			// Multi-user server component
-			var server v1.MCPServer
-			if err := req.Get(&server, component.MCPServerID); err != nil {
-				if apierrors.IsNotFound(err) {
-					// Skip components referencing servers that no longer exist
-					continue
-				}
-				return types.NewErrBadRequest("failed to get multi-user server %s: %v", component.MCPServerID, err)
-			}
-
-			// Verify this is actually a multi-user server
-			if server.Spec.IsSingleUser() {
-				return types.NewErrBadRequest("server %s is not a multi-user server", component.MCPServerID)
-			}
-
-			// Verify the server belongs to the same catalog
-			if catalogName != "" && server.Spec.MCPCatalogID != catalogName {
-				return types.NewErrBadRequest("multi-user server %s belongs to catalog %s, not %s", component.MCPServerID, server.Spec.MCPCatalogID, catalogName)
-			}
-
-			// Populate the manifest snapshot from the multi-user server
-			component.Manifest = server.Spec.Manifest.ConvertToCatalogEntry()
-			// Keep this component
-			componentServers = append(componentServers, *component)
-		} else {
-			// Catalog entry component
-			var entry v1.MCPServerCatalogEntry
-			if err := req.Get(&entry, component.CatalogEntryID); err != nil {
-				if apierrors.IsNotFound(err) {
-					// Skip components referencing catalog entries that no longer exist
-					continue
-				}
-				return types.NewErrBadRequest("failed to get component catalog entry %s: %v", component.CatalogEntryID, err)
-			}
-
-			// Verify the component entry belongs to the same scope
-			if catalogName != "" && entry.Spec.MCPCatalogName != catalogName {
-				return types.NewErrBadRequest("component entry %s does not belong to catalog %s", component.CatalogEntryID, catalogName)
-			}
-			if workspaceID != "" && entry.Spec.PowerUserWorkspaceID != workspaceID {
-				return types.NewErrBadRequest("component entry %s does not belong to workspace %s", component.CatalogEntryID, workspaceID)
-			}
-
-			if entry.Spec.Manifest.ServerUserType == types.ServerUserTypeMultiUser {
-				return types.NewErrBadRequest("multi-user catalog entry %s cannot be included in a composite server; use the multi-user MCP server instead", component.CatalogEntryID)
-			}
-
-			// Populate the manifest
-			component.Manifest = entry.Spec.Manifest
-			// Keep this component
-			componentServers = append(componentServers, *component)
-		}
-	}
-
-	// Replace with filtered component list
-	manifest.CompositeConfig.ComponentServers = componentServers
-
-	return nil
-}
-
-// RefreshCompositeComponents refreshes the component snapshots in a composite catalog entry
-func (h *MCPCatalogHandler) RefreshCompositeComponents(req api.Context) error {
-	catalogName := req.PathValue("catalog_id")
-	entryName := req.PathValue("entry_id")
-
-	// Verify the catalog exists
-	if err := req.Get(&v1.MCPCatalog{}, catalogName); err != nil {
-		return fmt.Errorf("failed to get catalog: %w", err)
-	}
-
-	var entry v1.MCPServerCatalogEntry
-	if err := req.Get(&entry, entryName); err != nil {
-		return fmt.Errorf("failed to get entry: %w", err)
-	}
-
-	// Verify entry belongs to the catalog
-	if entry.Spec.MCPCatalogName != catalogName {
-		return types.NewErrBadRequest("entry does not belong to catalog")
-	}
-
-	// Composites are not supported in power user workspaces yet; ensure this entry is not workspace-scoped
-	if entry.Spec.PowerUserWorkspaceID != "" {
-		return types.NewErrBadRequest("composite entries in power user workspaces are not supported")
-	}
-
-	if entry.Spec.Manifest.Runtime != types.RuntimeComposite {
-		return types.NewErrBadRequest("entry is not a composite catalog entry")
-	}
-
-	if entry.Spec.Manifest.CompositeConfig == nil {
-		return types.NewErrBadRequest("composite entry has no component configuration")
-	}
-
-	// Refresh component manifests from their current sources
-	// This will populate the entry.Spec.Manifest.CompositeConfig.ComponentServers with the current manifests
-	// and remove components that no longer exist
-	if err := h.populateComponentManifests(req, &entry.Spec.Manifest, catalogName, ""); err != nil {
-		return err
-	}
-
-	if entry.Spec.Manifest.ServerUserType == "" {
-		entry.Spec.Manifest.ServerUserType = types.ServerUserTypeSingleUser
-	}
-
-	// Validate the refreshed manifest to ensure it's still valid
-	entryGitManaged := entry.IsGitManaged()
-	if err := validateCatalogEntryManifestWithResourceMaximums(req, entry.Spec.Manifest, entryGitManaged, h.sessionManager); err != nil {
-		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
-	}
-	if err := tunnel.ValidateCatalogEntryTunnelReferences(req.Context(), req.Storage, entry.Spec.Manifest); err != nil {
-		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
-	}
-	// Preserve the git-managed status of the original entry when re-validating.
-	if err := mcp.ValidateSecretBindingsCatalogEntry(entry.Spec.Manifest, entryGitManaged, req.UserIsAdmin(), h.mcpBackend); err != nil {
-		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
-	}
-	if err := mcp.ValidateTemplateReferencesCatalogEntry(entry.Spec.Manifest); err != nil {
-		return types.NewErrBadRequest("failed to validate entry manifest: %v", err)
-	}
-
-	// Update the entry
-	if err := req.Update(&entry); err != nil {
-		return fmt.Errorf("failed to update entry: %w", err)
-	}
-
-	return req.Write(ConvertMCPServerCatalogEntry(entry, h.serverURL))
 }
 
 // entryRequiresStaticOAuthCreds checks if a catalog entry requires OAuth credentials
@@ -1994,6 +1517,16 @@ func (h *MCPCatalogHandler) DeleteOAuthCredentials(req api.Context) error {
 	deleted, err := req.GatewayClient.DeleteCredential(req.Context(), credName, system.StaticOAuthCredentialName)
 	if err != nil {
 		return err
+	}
+
+	// Publish the completed deletion even if reconciliation consumed the initial
+	// sync request while the credential was still present.
+	before := entry.DeepCopy()
+	entry.Annotations[v1.MCPServerCatalogEntrySyncAnnotation] = "true"
+	// Include the sync annotation in the patch even when it was already set locally.
+	delete(before.Annotations, v1.MCPServerCatalogEntrySyncAnnotation)
+	if err := req.Storage.Patch(req.Context(), entry, kclient.MergeFrom(before)); err != nil {
+		return fmt.Errorf("failed to trigger reconciliation after credential deletion: %w", err)
 	}
 
 	// Best-effort cleanup of per-user OAuth tokens associated with this catalog entry.

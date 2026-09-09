@@ -4,11 +4,11 @@
 	import CopyField from '$lib/components/CopyField.svelte';
 	import Layout from '$lib/components/Layout.svelte';
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
-	import ConnectToServer from '$lib/components/mcp/ConnectToServer.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
 	import CreateEditVMcp from '$lib/components/vmcps/CreateEditVMcp.svelte';
 	import CreateVMcpButton from '$lib/components/vmcps/CreateVMcpButton.svelte';
 	import McpServersSidebar from '$lib/components/vmcps/McpServersSidebar.svelte';
+	import VMcpConnectDialog from '$lib/components/vmcps/VMcpConnectDialog.svelte';
 	import VMcpDragOverlay from '$lib/components/vmcps/VMcpDragOverlay.svelte';
 	import VMcpGraph from '$lib/components/vmcps/VMcpGraph.svelte';
 	import VMcpGraphRow from '$lib/components/vmcps/VMcpGraphRow.svelte';
@@ -24,24 +24,22 @@
 		AdminService,
 		Group,
 		UserService,
-		type CatalogComponentServer,
 		type MCPCatalogEntry,
-		type MCPServerInstance,
-		type OrgUser
+		type OrgUser,
+		type VMCP,
+		type VMCPComponent
 	} from '$lib/services';
 	import { AiClient, COMMON_AI_CLIENTS } from '$lib/services/user/constants';
-	import { isMultiUserCatalogEntry, isMultiUserServer } from '$lib/services/user/mcp';
 	import { vmcpRowHeight } from '$lib/services/vmcps/camera';
 	import { SHORT_DESCRIPTION_MAX_LENGTH } from '$lib/services/vmcps/constants';
 	import type { VMcpSortBy } from '$lib/services/vmcps/types';
 	import {
 		appendComponentLabel,
+		buildConnectAllSnippets,
 		buildVMcpComponentFilterOptions,
 		filterVMcps,
-		isWorkspaceOwned,
-		sortVMcps,
 		resolveVMcpComponents,
-		buildConnectAllSnippets
+		sortVMcps
 	} from '$lib/services/vmcps/utils';
 	import { errors, mcpServersAndEntries, profile } from '$lib/stores';
 	import { success } from '$lib/stores/success';
@@ -56,37 +54,60 @@
 
 	let viewType = $state<'graph' | 'table'>('graph');
 	let showRightPanel = $state(true);
-	let isLoading = $derived(mcpServersAndEntries.current.loading);
+	let isLoading = $state(true);
 	let showAllConnectors = $state(false);
+	let showMyVMcpsOnly = $state(false);
 	let sortBy = $state<VMcpSortBy>('name');
 	let nameFilterBy = $state('');
 	let ownerFilterBy = $state('');
 	let componentFilterBy = $state('');
-	let allComposites = $derived(
-		mcpServersAndEntries.current.entries.filter(
-			(entry) =>
-				entry.manifest.runtime === 'composite' && (showAllConnectors || !isWorkspaceOwned(entry))
+	let vmcps = $state<VMCP[]>([]);
+
+	function replaceVMcp(updated: VMCP) {
+		vmcps = vmcps.map((candidate) => (candidate.id === updated.id ? updated : candidate));
+	}
+
+	function addVMcp(created: VMCP) {
+		vmcps = [...vmcps.filter((candidate) => candidate.id !== created.id), created];
+	}
+
+	function removeVMcp(id: string) {
+		vmcps = vmcps.filter((candidate) => candidate.id !== id);
+	}
+
+	let allVMcps = $derived(
+		vmcps.filter(
+			(vmcp) =>
+				(showAllConnectors || !vmcp.userID || vmcp.userID === profile.current.id) &&
+				(!showMyVMcpsOnly || vmcp.userID === profile.current.id)
 		)
 	);
+
 	function componentFilterLabel(id: string) {
 		const entry = mcpServersAndEntries.current.entries.find((candidate) => candidate.id === id);
 		if (entry?.manifest.name) return entry.manifest.name;
-		return mcpServersAndEntries.current.servers.find((candidate) => candidate.id === id)?.manifest
-			.name;
+		for (const vmcp of vmcps) {
+			const component = vmcp.components.find(
+				(candidate) => candidate.id === id || candidate.mcpServerCatalogEntryID === id
+			);
+			if (component) return component.name || component.catalogEntry.manifest.name;
+		}
+		return id;
 	}
+
 	let componentFilterOptions = $derived(
-		buildVMcpComponentFilterOptions(allComposites, componentFilterLabel)
+		buildVMcpComponentFilterOptions(allVMcps, componentFilterLabel)
 	);
 
 	let createEditVMcp = $state<ReturnType<typeof CreateEditVMcp>>();
 	let catalogEntryDialog = $state<ReturnType<typeof ViewModifyCatalogEntry>>();
-	let connectToServerDialog = $state<ReturnType<typeof ConnectToServer>>();
+	let connectVMcpDialog = $state<ReturnType<typeof VMcpConnectDialog>>();
 
 	let connectAllVMcpsDialog = $state<ReturnType<typeof ResponsiveDialog>>();
 	let connectAllCopyField = $state<ReturnType<typeof CopyField>>();
 	let selectedClient = $state<(typeof COMMON_AI_CLIENTS)[number]>();
 	let isAdmin = $derived(!!profile.current.isAdmin?.());
-	let connectAllVmcps = $derived(allComposites.filter((vmcp) => Boolean(vmcp.connectURL)));
+	let connectAllVmcps = $derived(allVMcps);
 	let connectAllSnippets = $derived(
 		selectedClient ? buildConnectAllSnippets(selectedClient.id, connectAllVmcps, isAdmin) : []
 	);
@@ -97,21 +118,19 @@
 	);
 
 	let users = $state<OrgUser[]>([]);
-
 	let rightPanelEl = $state<HTMLElement>();
 	let rightPanelWidth = $state(0);
-	let pendingEntryDrop = $state<{ vmcp?: MCPCatalogEntry }>();
+	let pendingEntryDrop = $state<{ vmcp?: VMCP }>();
 	let expandedVMcpIds = $state<string[]>([]);
 	let expandedInitialized = $state(false);
-	const toolFlow = createVMcpToolFlow();
+	const toolFlow = createVMcpToolFlow({ onUpdated: replaceVMcp });
 
 	let query = $derived(page.url.searchParams.get('query') ?? '');
 	let usersMap = $derived(new Map(users.map((user) => [user.id, user])));
-
-	let composites = $derived(
+	let displayedVMcps = $derived(
 		sortVMcps(
 			filterVMcps(
-				allComposites,
+				allVMcps,
 				{
 					names: nameFilterBy,
 					owners: ownerFilterBy,
@@ -124,71 +143,61 @@
 	);
 
 	onMount(() => {
-		UserService.listUsersIncludeDeleted().then((response) => {
-			users = response;
-		});
+		void Promise.all([
+			UserService.listVMCPs().then((items) => (vmcps = items)),
+			UserService.listUsersIncludeDeleted().then((items) => (users = items))
+		])
+			.catch(() => errors.append('Failed to load vMCPs.'))
+			.finally(() => (isLoading = false));
 	});
-
-	function catalogEntryForComponent(component: CatalogComponentServer) {
-		if (component.catalogEntryID) {
-			return mcpServersAndEntries.current.entries.find(
-				(entry) => entry.id === component.catalogEntryID
-			);
-		}
-
-		if (!component.mcpServerID) return undefined;
-
-		const server = mcpServersAndEntries.current.servers.find(
-			(candidate) => candidate.id === component.mcpServerID
-		);
-		if (!server?.catalogEntryID) return undefined;
-
-		return mcpServersAndEntries.current.entries.find((entry) => entry.id === server.catalogEntryID);
-	}
-
-	function componentManifestField(
-		component: CatalogComponentServer,
-		field: 'name' | 'shortDescription'
-	) {
-		const entry = catalogEntryForComponent(component);
-		const server = component.mcpServerID
-			? mcpServersAndEntries.current.servers.find(
-					(candidate) => candidate.id === component.mcpServerID
-				)
-			: undefined;
-		const manifest = component.manifest ?? entry?.manifest ?? server?.manifest;
-		return manifest?.[field];
-	}
 
 	let canCreateCatalogEntry = $derived(
 		profile.current.isAdmin?.() || profile.current.groups.includes(Group.POWERUSER)
 	);
 
 	const entryDrag = createEntryDrag({
-		composites: () => composites,
+		vmcps: () => displayedVMcps,
 		panelEl: () => rightPanelEl,
-		openEntry: (entry) => openCatalogEntry(entry),
-		createEntry: (target) => startCatalogEntryCreation(target),
-		dropOnCreate: (entry) => handleDroppedOnCreate(entry),
+		openEntry: openCatalogEntry,
+		createEntry: startCatalogEntryCreation,
+		dropOnCreate: (entry) => void handleDroppedOnCreate(entry),
 		dropOnVMcp: (entry, vmcp) => void handleDropped(entry, vmcp)
 	});
 
-	$effect(() => {
-		const el = rightPanelEl;
-		if (!el) return;
+	function snapshotComponent(entry: MCPCatalogEntry, manifest = entry.manifest): VMCPComponent {
+		return {
+			name: manifest.name || entry.id,
+			mcpCatalogID: DEFAULT_MCP_CATALOG_ID,
+			mcpServerCatalogEntryID: entry.id,
+			catalogEntry: {
+				manifest,
+				unsupportedTools: entry.unsupportedTools ?? []
+			}
+		};
+	}
 
-		const observer = new ResizeObserver(() => {
-			rightPanelWidth = el.getBoundingClientRect().width;
-		});
-		observer.observe(el);
-		return () => observer.disconnect();
-	});
+	/** Generate a source preview before the definition becomes a vMCP snapshot. */
+	async function prepareComponent(entry: MCPCatalogEntry) {
+		try {
+			const generated = await AdminService.generateMcpCatalogEntryToolPreviews(
+				DEFAULT_MCP_CATALOG_ID,
+				entry.id,
+				{},
+				{ dryRun: true }
+			);
+			return snapshotComponent(generated, generated.manifest);
+		} catch {
+			// Configuration- and OAuth-protected sources can only generate after their setup flow. Keep
+			// the source's current preview so a later source edit can retry without losing the snapshot.
+			return snapshotComponent(entry);
+		}
+	}
 
 	function openCatalogEntry(entry: MCPCatalogEntry) {
 		void catalogEntryDialog?.open(entry);
 	}
 
-	function startCatalogEntryCreation(target?: { vmcp?: MCPCatalogEntry }) {
+	function startCatalogEntryCreation(target?: { vmcp?: VMCP }) {
 		pendingEntryDrop = target;
 		catalogEntryDialog?.start(target ? { closeAfterCreate: true } : undefined);
 	}
@@ -196,101 +205,75 @@
 	async function handleCatalogEntryCreated(created: MCPCatalogEntry) {
 		const pending = pendingEntryDrop;
 		pendingEntryDrop = undefined;
-		if (!pending) return;
-
-		if (pending.vmcp) {
+		if (pending?.vmcp) {
 			await handleDropped(created, pending.vmcp);
 			return;
 		}
-
-		handleDroppedOnCreate(created);
+		await handleDroppedOnCreate(created);
 	}
 
-	function toComponentServer(entry: MCPCatalogEntry): CatalogComponentServer | undefined {
-		if (!isMultiUserCatalogEntry(entry)) {
-			return { catalogEntryID: entry.id, manifest: entry.manifest };
-		}
-
-		const deployed = mcpServersAndEntries.current.servers.find(
-			(server) => isMultiUserServer(server) && server.catalogEntryID === entry.id
-		);
-		return deployed ? { mcpServerID: deployed.id } : undefined;
+	async function handleDroppedOnCreate(entry: MCPCatalogEntry) {
+		const component = await prepareComponent(entry);
+		createEditVMcp?.openCreate([component]);
 	}
 
-	function handleDroppedOnCreate(entry: MCPCatalogEntry) {
-		const component = toComponentServer(entry);
-		if (!component) {
-			errors.append(
-				`${entry.manifest.name} is a multi-user server and must be deployed before it can be added to a vMCP.`
-			);
-			return;
-		}
-
-		createEditVMcp?.openCreate([{ ...component, manifest: component.manifest ?? entry.manifest }]);
-	}
-
-	async function handleDropped(entry: MCPCatalogEntry, vmcp: MCPCatalogEntry) {
-		const component = toComponentServer(entry);
-		if (!component) {
-			errors.append(
-				`${entry.manifest.name} is a multi-user server and must be deployed before it can be added to a vMCP.`
-			);
-			return;
-		}
-
+	async function handleDropped(entry: MCPCatalogEntry, vmcp: VMCP) {
+		const component = await prepareComponent(entry);
 		try {
-			const latest = await AdminService.getMCPCatalogEntry(DEFAULT_MCP_CATALOG_ID, vmcp.id);
-			const components = latest.manifest.compositeConfig?.componentServers ?? [];
+			const latest = await UserService.getVMCP(vmcp.id);
 			if (
-				components.some(
-					(existing) =>
-						(component.catalogEntryID && existing.catalogEntryID === component.catalogEntryID) ||
-						(component.mcpServerID && existing.mcpServerID === component.mcpServerID)
+				latest.components.some(
+					(existing) => existing.mcpServerCatalogEntryID === component.mcpServerCatalogEntryID
 				)
 			) {
 				return;
 			}
 
-			const nextComponents = [...components, component];
-			const updated = await AdminService.updateMCPCatalogEntry(DEFAULT_MCP_CATALOG_ID, vmcp.id, {
-				...latest.manifest,
-				name:
+			const components = latest.components;
+			const updated = await UserService.updateVMCP(latest.id, {
+				displayName:
 					appendComponentLabel(
-						latest.manifest.name,
-						components.map((existing) => componentManifestField(existing, 'name')),
-						entry.manifest.name
-					) ?? latest.manifest.name,
-				shortDescription:
+						latest.displayName,
+						components.map((existing) => existing.name || existing.catalogEntry.manifest.name),
+						component.name
+					) ?? latest.displayName,
+				description:
 					appendComponentLabel(
-						latest.manifest.shortDescription,
-						components.map((existing) => componentManifestField(existing, 'shortDescription')),
-						entry.manifest.shortDescription,
+						latest.description,
+						components.map(
+							(existing) =>
+								existing.catalogEntry.manifest.shortDescription ||
+								existing.catalogEntry.manifest.description
+						),
+						entry.manifest.shortDescription || entry.manifest.description,
 						SHORT_DESCRIPTION_MAX_LENGTH
-					) ?? latest.manifest.shortDescription,
-				compositeConfig: {
-					...latest.manifest.compositeConfig,
-					componentServers: nextComponents
-				}
+					) ?? latest.description,
+				icon: latest.icon,
+				components: [...components, component],
+				profiles: latest.profiles,
+				forceSingleUser: latest.forceSingleUser
 			});
-
-			mcpServersAndEntries.current.entries = mcpServersAndEntries.current.entries.map(
-				(candidate) => (candidate.id === updated.id ? updated : candidate)
+			replaceVMcp(updated);
+			successMessage(`${entry.manifest.name} added to ${updated.displayName}.`);
+			const added = updated.components.find(
+				(candidate) => candidate.mcpServerCatalogEntryID === component.mcpServerCatalogEntryID
 			);
-			success.add(`${entry.manifest.name} added to ${updated.manifest.name}.`);
-
-			toolFlow.offerToolSelection(entry, updated);
+			if (added) toolFlow.offerToolSelection(added, updated);
 		} catch {
 			errors.append('Failed to add MCP server to vMCP.');
 		}
 	}
 
-	function vmcpComponents(vmcp: MCPCatalogEntry) {
-		const { entries, servers } = mcpServersAndEntries.current;
-		return resolveVMcpComponents(vmcp, entries, servers);
+	function successMessage(message: string) {
+		success.add(message);
 	}
 
-	function handleConnectVMcp(vmcp: MCPCatalogEntry) {
-		connectToServerDialog?.open({ entry: vmcp });
+	function vmcpComponents(vmcp: VMCP) {
+		return resolveVMcpComponents(vmcp);
+	}
+
+	function handleConnectVMcp(vmcp: VMCP) {
+		connectVMcpDialog?.open(vmcp);
 	}
 
 	function openConnectAllDialog(option: (typeof COMMON_AI_CLIENTS)[number]) {
@@ -298,14 +281,6 @@
 		selectedConnectAllSnippetId = undefined;
 		connectAllCopyField?.clear?.();
 		connectAllVMcpsDialog?.open();
-	}
-
-	function handleConnectToServer({ instance }: { instance?: MCPServerInstance }) {
-		if (instance) {
-			mcpServersAndEntries.refreshUserInstances();
-		} else {
-			mcpServersAndEntries.refreshUserConfiguredServers();
-		}
 	}
 
 	const updateSearchQuery = (value: string) => {
@@ -334,7 +309,7 @@
 		return expandedVMcpIds.includes(id);
 	}
 
-	function toggleExpandedVMcp(vmcp: MCPCatalogEntry) {
+	function toggleExpandedVMcp(vmcp: VMCP) {
 		expandedVMcpIds = isVMcpExpanded(vmcp.id)
 			? expandedVMcpIds.filter((id) => id !== vmcp.id)
 			: [...expandedVMcpIds, vmcp.id];
@@ -349,8 +324,8 @@
 			expandedInitialized = true;
 			return;
 		}
-		if (composites.length === 0) return;
-		expandedVMcpIds = composites.slice(0, INITIAL_EXPANDED_VMCPS).map((vmcp) => vmcp.id);
+		if (displayedVMcps.length === 0) return;
+		expandedVMcpIds = displayedVMcps.slice(0, INITIAL_EXPANDED_VMCPS).map((vmcp) => vmcp.id);
 		persistExpandedVMcps(expandedVMcpIds);
 		expandedInitialized = true;
 	});
@@ -388,25 +363,28 @@
 	>
 		{#if isLoading}
 			<Loading class="text-primary" />
-		{:else if allComposites.length > 0}
+		{:else}
 			<div class="absolute top-3 left-3 z-10">
 				<VMcpSettings
 					bind:showAllConnectors
+					bind:showMyVMcpsOnly
 					bind:sortBy
 					bind:ownerFilterBy
 					bind:componentFilterBy
 					{componentFilterOptions}
 				/>
 			</div>
-			{#if viewType === 'graph'}
-				{@render graphView()}
+			{#if allVMcps.length > 0}
+				{#if viewType === 'graph'}
+					{@render graphView()}
+				{:else}
+					{@render tableView()}
+				{/if}
 			{:else}
-				{@render tableView()}
+				<div class="flex h-full items-center justify-center">
+					<CreateVMcpButton drag={entryDrag} onCreate={() => createEditVMcp?.openCreate()} />
+				</div>
 			{/if}
-		{:else}
-			<div class="flex h-full items-center justify-center">
-				<CreateVMcpButton drag={entryDrag} onCreate={() => createEditVMcp?.openCreate()} />
-			</div>
 		{/if}
 	</div>
 	{#snippet rightSidebar()}
@@ -424,7 +402,7 @@
 
 {#snippet graphView()}
 	<VMcpGraph
-		items={composites}
+		items={displayedVMcps}
 		expandedIds={expandedVMcpIds}
 		dragActive={entryDrag.active}
 		estimateHeight={(vmcp, expanded) => vmcpRowHeight(vmcpComponents(vmcp).length, expanded)}
@@ -453,7 +431,7 @@
 
 {#snippet tableView()}
 	<VMcpTable
-		items={composites}
+		items={displayedVMcps}
 		drag={entryDrag}
 		components={vmcpComponents}
 		{rightPanelWidth}
@@ -493,16 +471,18 @@
 {/snippet}
 
 <VMcpDragOverlay drag={entryDrag} />
-
 <VMcpToolDialogs flow={toolFlow} />
+<VMcpConnectDialog bind:this={connectVMcpDialog} />
 
-<ConnectToServer
-	bind:this={connectToServerDialog}
-	catalogID={DEFAULT_MCP_CATALOG_ID}
-	onConnect={handleConnectToServer}
+<CreateEditVMcp
+	bind:this={createEditVMcp}
+	onCreated={(created) => {
+		addVMcp(created);
+		toolFlow.handleVMcpCreated(created);
+	}}
+	onChanged={replaceVMcp}
+	onDeleted={removeVMcp}
 />
-
-<CreateEditVMcp bind:this={createEditVMcp} onCreated={toolFlow.handleVMcpCreated} />
 
 <ViewModifyCatalogEntry
 	bind:this={catalogEntryDialog}
@@ -524,9 +504,7 @@
 	{/snippet}
 	<div class="flex flex-col gap-3 md:p-0 p-4">
 		{#if connectAllVmcps.length === 0}
-			<p class="text-sm text-muted-content font-light">
-				No vMCPs currently have a connection URL to copy.
-			</p>
+			<p class="text-sm text-muted-content font-light">No vMCPs are available to connect.</p>
 		{:else if selectedConnectAllSnippet}
 			{#if connectAllSnippets.length > 1}
 				<div role="tablist" class="tabs tabs-box" aria-label="Configuration files">
@@ -551,36 +529,35 @@
 							{#if isAdmin && selectedConnectAllSnippet.id === 'claude-settings-json'}
 								<p>
 									Go to <code class="text-base-content"
-										>Admin Settings > Claude Code > Managed settings</code
-									> and add the following configuration JSON:
+										>Admin Settings &gt; Claude Code &gt; Managed settings</code
+									>
+									and add the following configuration JSON:
 								</p>
 							{:else}
 								<p>
 									Copy the configuration below into your project's <code class="text-base-content"
 										>.mcp.json</code
 									>
-									or your user-level
-									<code class="text-base-content">~/.claude.json</code>.
+									or your user-level <code class="text-base-content">~/.claude.json</code>.
 								</p>
 							{/if}
 						{:else if selectedClient.id === AiClient.Codex}
 							<p>
-								Copy these tables into
-								<code class="text-base-content">~/.codex/config.toml</code>
-								or a project-scoped
-								<code class="text-base-content">.codex/config.toml</code>.
+								Copy these tables into <code class="text-base-content">~/.codex/config.toml</code>
+								or a project-scoped <code class="text-base-content">.codex/config.toml</code>.
 							</p>
 						{:else if selectedClient.id === AiClient.Cursor}
 							<p>
-								Copy the configuration below into
-								<code class="text-base-content">~/.cursor/mcp.json</code>
-								or your project's
-								<code class="text-base-content">.cursor/mcp.json</code>.
+								Copy the configuration below into <code class="text-base-content"
+									>~/.cursor/mcp.json</code
+								>
+								or your project's <code class="text-base-content">.cursor/mcp.json</code>.
 							</p>
 						{:else if selectedClient.id === AiClient.VSCode}
 							<p>
-								Copy this configuration into your workspace
-								<code class="text-base-content">.vscode/mcp.json</code>.
+								Copy this configuration into your workspace <code class="text-base-content"
+									>.vscode/mcp.json</code
+								>.
 							</p>
 						{/if}
 					</div>

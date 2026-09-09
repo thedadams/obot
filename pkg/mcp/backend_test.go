@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"testing"
 	"time"
 
@@ -49,52 +48,42 @@ func TestConstructMCPServerMMMCPYAML(t *testing.T) {
 	}
 }
 
-func TestMMMCPConfigPreservesCompositeSettings(t *testing.T) {
+func TestMMMCPConfigTreatsVMCPAsAggregate(t *testing.T) {
 	config := MMMCPConfig(ServerConfig{
-		Runtime:                types.RuntimeComposite,
-		MCPServerName:          "composite-server",
-		MCPServerDisplayName:   "Composite Server",
-		PassthroughHeaderNames: []string{"X-Tenant"},
+		Runtime:              types.RuntimeVMCP,
+		MCPServerName:        "vmcp-server",
+		MCPServerDisplayName: "VMCP Server",
 		Components: []ComponentServer{
 			{
 				DisplayName: "search",
-				URL:         "http://127.0.0.1:8080/mcp-connect/component",
-				ToolPrefix:  "custom",
+				URL:         "http://127.0.0.1:8080/mcp-connect/search",
+				ToolPrefix:  "search_",
 				Tools: []types.ToolOverride{
 					{
-						Name:                "enabled",
-						OverrideName:        "renamed",
-						Description:         "original description",
-						OverrideDescription: "replacement description",
+						Name:                "find",
+						OverrideName:        "find_documents",
+						Description:         "find a document",
+						OverrideDescription: "find documents",
 						Enabled:             true,
 					},
-					{Name: "disabled", Enabled: false},
 				},
 			},
 		},
 	}, nil)
 
-	if config.Name != "Composite Server" || config.Version != version.Get().String() {
-		t.Fatalf("server identity = %q/%q, want %q/%q", config.Name, config.Version, "Composite Server", version.Get().String())
-	}
-	if len(config.Servers) != 1 {
-		t.Fatalf("got %d component servers, want 1", len(config.Servers))
+	if config.Name != "VMCP Server" || len(config.Servers) != 1 {
+		t.Fatalf("vMCP config = %#v, want one aggregate component", config)
 	}
 	server := config.Servers[0]
-	if server.Name != "search" || server.URL != "http://127.0.0.1:8080/mcp-connect/component" || server.Prefix != "custom" {
-		t.Fatalf("unexpected component server: %#v", server)
+	if server.Name != "search" || server.URL != "http://127.0.0.1:8080/mcp-connect/search" || server.Prefix != "search_" {
+		t.Fatalf("vMCP component = %#v, want preserved name, URL, and prefix", server)
 	}
-	if !slices.Equal(server.PassthroughHeaders, []string{"Authorization", "X-Tenant"}) {
-		t.Fatalf("passthrough headers = %v", server.PassthroughHeaders)
+	if len(server.Tools) != 1 {
+		t.Fatalf("vMCP tool overrides = %#v, want one", server.Tools)
 	}
-	if len(server.Tools) != 2 {
-		t.Fatalf("tool overrides = %#v", server.Tools)
-	}
-	if tool := server.Tools[0]; tool.Name != "enabled" || tool.OverrideName != "renamed" || tool.Description != "original description" || tool.OverrideDescription != "replacement description" || !tool.Enabled {
-		t.Fatalf("unexpected enabled tool override: %#v", tool)
-	}
-	if tool := server.Tools[1]; tool.Name != "disabled" || tool.Enabled {
-		t.Fatalf("unexpected disabled tool override: %#v", tool)
+	tool := server.Tools[0]
+	if tool.Name != "find" || tool.OverrideName != "find_documents" || tool.Description != "find a document" || tool.OverrideDescription != "find documents" || !tool.Enabled {
+		t.Fatalf("vMCP tool override = %#v, want preserved override", tool)
 	}
 }
 

@@ -1,4 +1,4 @@
-import type { MCPCatalogEntry } from '$lib/services';
+import type { MCPCatalogEntry, VMCP } from '$lib/services';
 import { borderAnchor, buildWirePath, distanceToRect } from '../../services/vmcps/utils';
 import type { Action } from 'svelte/action';
 import type { Attachment } from 'svelte/attachments';
@@ -20,12 +20,12 @@ type DropTarget = {
 };
 
 export interface EntryDragOptions {
-	composites: () => MCPCatalogEntry[];
+	vmcps: () => VMCP[];
 	panelEl: () => HTMLElement | undefined;
 	openEntry: (entry: MCPCatalogEntry) => void;
-	createEntry: (target?: { vmcp?: MCPCatalogEntry }) => void;
+	createEntry: (target?: { vmcp?: VMCP }) => void;
 	dropOnCreate: (entry: MCPCatalogEntry) => void;
-	dropOnVMcp: (entry: MCPCatalogEntry, vmcp: MCPCatalogEntry) => void;
+	dropOnVMcp: (entry: MCPCatalogEntry, vmcp: VMCP) => void;
 }
 
 /**
@@ -53,7 +53,7 @@ export function createEntryDrag(options: EntryDragOptions) {
 	const vmcpEls = $state<Record<string, HTMLElement>>({});
 	const componentEls = $state<Record<string, { target: ComponentTarget; el: HTMLElement }>>({});
 
-	const linkedVMcp = $derived(options.composites().find((vmcp) => vmcp.id === linkedVMcpId));
+	const linkedVMcp = $derived(options.vmcps().find((vmcp) => vmcp.id === linkedVMcpId));
 
 	const wire = $derived.by(() => {
 		if (!drag?.active || !linkedVMcpId) return undefined;
@@ -88,7 +88,7 @@ export function createEntryDrag(options: EntryDragOptions) {
 		if (createEl) {
 			targets.push({ vmcpId: CREATE_VMCP_DROP_ID, el: createEl, isComponentsPanel: false });
 		}
-		for (const vmcp of options.composites()) {
+		for (const vmcp of options.vmcps()) {
 			const card = vmcpEls[vmcp.id];
 			if (card) targets.push({ vmcpId: vmcp.id, el: card, isComponentsPanel: false });
 		}

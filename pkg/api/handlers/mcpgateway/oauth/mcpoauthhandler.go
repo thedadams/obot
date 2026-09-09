@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"github.com/obot-platform/obot/apiclient/types"
@@ -14,6 +15,7 @@ import (
 	"github.com/obot-platform/obot/pkg/mcp"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
+	vmcpconfig "github.com/obot-platform/obot/pkg/vmcp"
 	"golang.org/x/oauth2"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -43,7 +45,8 @@ type mcpOAuthHandler struct {
 	urlChan            chan string
 
 	// catalogEntryName is the name of the catalog entry to fetch static OAuth credentials for.
-	catalogEntryName string
+	catalogEntryName  string
+	credentialContext string
 }
 
 func NewMCPOAuthHandlerFactory(baseURL string, sessionManager *mcp.SessionManager, client kclient.Client, gatewayClient *client.Client, globalTokenStore mcp.GlobalTokenStore, secretBindingAllowedLabel string, forceDynamicClient bool) *MCPOAuthHandlerFactory {
@@ -64,30 +67,14 @@ func NewMCPOAuthHandlerFactory(baseURL string, sessionManager *mcp.SessionManage
 }
 
 func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.MCPServer, mcpServerConfig mcp.ServerConfig, userID, mcpID, oauthAppAuthRequestID string) (string, error) {
-	if mcpServer.Spec.Manifest.Runtime == types.RuntimeComposite {
-		var componentServers v1.MCPServerList
-		if err := f.client.List(req.Context(), &componentServers,
-			kclient.InNamespace(mcpServer.Namespace),
-			kclient.MatchingFields{"spec.compositeName": mcpServer.Name},
-		); err != nil {
-			return "", fmt.Errorf("failed to list component servers")
+	if mcpServer.Spec.Manifest.Runtime == types.RuntimeVMCP {
+		componentServers, err := f.componentServersForAuth(req, mcpServer, mcpServerConfig)
+		if err != nil {
+			return "", err
 		}
 
-		// Precompute disabled component set for quick lookup (by catalog entry ID only)
-		var compositeConfig types.CompositeRuntimeConfig
-		if mcpServer.Spec.Manifest.CompositeConfig != nil {
-			compositeConfig = *mcpServer.Spec.Manifest.CompositeConfig
-		}
-
-		disabled := make(map[string]bool, len(compositeConfig.ComponentServers))
-		for _, comp := range compositeConfig.ComponentServers {
-			disabled[comp.CatalogEntryID] = comp.Disabled
-		}
-
-		for _, componentServer := range componentServers.Items {
-			// Skip disabled components defined in the composite server config using O(1) lookups
-			if disabled[componentServer.Spec.MCPServerCatalogEntryName] ||
-				componentServer.Spec.Manifest.Runtime != types.RuntimeRemote {
+		for _, componentServer := range componentServers {
+			if componentServer.Spec.Manifest.Runtime != types.RuntimeRemote {
 				continue
 			}
 
@@ -105,21 +92,17 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 			}
 
 			if u != "" {
-				// At least one component requires OAuth
-				slog.Info("Composite MCP server requires component OAuth authentication", "compositeMCPID", mcpID, "componentMCPID", componentServer.Name)
-				if oauthAppAuthRequestID != "" {
-					return fmt.Sprintf("%s/auth/mcp/composite/%s?oauth_auth_request=%s", f.baseURL, mcpID, oauthAppAuthRequestID), nil
-				}
-
-				return fmt.Sprintf("%s/auth/mcp/composite/%s", f.baseURL, mcpID), nil
+				// At least one component requires OAuth.
+				slog.Info("Aggregate MCP server requires component OAuth authentication", "mcpID", mcpID, "componentMCPID", componentServer.Name)
+				return compositeConsentURL(f.baseURL, mcpID, mcpServer.Spec.VMCPID, oauthAppAuthRequestID), nil
 			}
 		}
 
 		// No component requires OAuth
-		slog.Info("Composite MCP server passed OAuth check with no pending component authentication", "compositeMCPID", mcpID)
+		slog.Info("Aggregate MCP server passed OAuth check with no pending component authentication", "mcpID", mcpID)
 		return "", nil
 	} else if mcpServerConfig.Runtime != types.RuntimeRemote {
-		// Not a remote or composite server, no OAuth required
+		// Not a remote or vMCP server, no OAuth required
 		return "", nil
 	}
 
@@ -131,6 +114,13 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 
 	// Remote server, check for OAuth directly
 	oauthHandler := f.newMCPOAuthHandler(req.GatewayClient, userID, mcpID, mcpServerConfig.URL, oauthAppAuthRequestID, mcpServerConfig.MCPCatalogEntryName)
+	if mcpServer.Spec.VMCPID != "" || mcpServer.Spec.VMCPInstanceID != "" {
+		credentialContext, _, err := vmcpconfig.ServerOAuthCredentialReference(req.Context(), f.client, mcpServer)
+		if err != nil {
+			return "", fmt.Errorf("resolve VMCP OAuth credential: %w", err)
+		}
+		oauthHandler.credentialContext = credentialContext
+	}
 	staticOAuthPending, err := f.staticOAuthPending(req.Context(), mcpServer, oauthHandler)
 	if err != nil {
 		return "", err
@@ -172,6 +162,49 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 		slog.Info("Remote MCP server requires OAuth authentication", "mcpID", mcpID)
 		return u, nil
 	}
+}
+
+func compositeConsentURL(baseURL, connectID, vmcpID, authRequestID string) string {
+	query := url.Values{}
+	if authRequestID != "" {
+		query.Set("oauth_auth_request", authRequestID)
+	}
+	// The UI loads metadata by canonical ID, but authenticates the original
+	// connection so migrated users with multiple instances keep their selection.
+	if vmcpID != "" && vmcpID != connectID {
+		query.Set("vmcp_id", vmcpID)
+	}
+	result := fmt.Sprintf("%s/auth/mcp/composite/%s", baseURL, connectID)
+	if len(query) > 0 {
+		result += "?" + query.Encode()
+	}
+	return result
+}
+
+func (f *MCPOAuthHandlerFactory) componentServersForAuth(req api.Context, mcpServer v1.MCPServer, mcpServerConfig mcp.ServerConfig) ([]v1.MCPServer, error) {
+	if mcpServer.Spec.Manifest.Runtime == types.RuntimeVMCP {
+		componentServers := make([]v1.MCPServer, 0, len(mcpServerConfig.Components))
+		for _, component := range mcpServerConfig.Components {
+			var componentServer v1.MCPServer
+			key := kclient.ObjectKey{
+				Namespace: mcpServer.Namespace,
+				Name:      component.Name,
+			}
+			var err error
+			if req.Storage != nil {
+				err = req.Storage.Get(req.Context(), key, &componentServer)
+			} else {
+				err = f.client.Get(req.Context(), key, &componentServer)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to get vMCP component server %q: %w", component.Name, err)
+			}
+			componentServers = append(componentServers, componentServer)
+		}
+		return componentServers, nil
+	}
+
+	return nil, nil
 }
 
 func (f *MCPOAuthHandlerFactory) downstreamOAuthClientName(req api.Context, oauthAuthRequestID string) (string, error) {
@@ -314,8 +347,12 @@ func (m *mcpOAuthHandler) NewState(ctx context.Context, conf *oauth2.Config, res
 
 func (m *mcpOAuthHandler) Lookup(ctx context.Context) (string, string, error) {
 	// If the server was created from a catalog entry, look up OAuth credentials by catalog entry name
-	if m.catalogEntryName != "" {
-		cred, err := m.gatewayClient.RevealCredential(ctx, []string{system.MCPOAuthCredentialName(m.catalogEntryName)}, system.StaticOAuthCredentialName)
+	credentialContext := m.credentialContext
+	if credentialContext == "" && m.catalogEntryName != "" {
+		credentialContext = system.MCPOAuthCredentialName(m.catalogEntryName)
+	}
+	if credentialContext != "" {
+		cred, err := m.gatewayClient.RevealCredential(ctx, []string{credentialContext}, system.StaticOAuthCredentialName)
 		if err == nil {
 			clientID := cred.Secrets["CLIENT_ID"]
 			clientSecret := cred.Secrets["CLIENT_SECRET"]

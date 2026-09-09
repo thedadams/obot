@@ -1,4 +1,4 @@
-import type { MCPServerTool, ToolOverride } from '../user/types';
+import type { MCPServerTool, ToolOverride, VMCP, VMCPComponent } from '../user/types';
 
 export interface VMcpComponentView {
 	key: string;
@@ -9,6 +9,9 @@ export interface VMcpComponentView {
 	toolOverrides?: ToolOverride[];
 	toolPreview?: MCPServerTool[];
 }
+
+export type VMcp = VMCP;
+export type VMcpComponent = VMCPComponent;
 
 export type Point = { x: number; y: number };
 export type RectLike = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom' | 'width' | 'height'>;

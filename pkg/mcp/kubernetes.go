@@ -156,8 +156,8 @@ func (k *kubernetesBackend) ensureServerDeployment(ctx context.Context, server S
 		server.Webhooks[i] = webhook
 	}
 
-	if server.Runtime == types.RuntimeRemote || server.Runtime == types.RuntimeComposite {
-		// Remove any existing deployment for remote and composite servers
+	if server.Runtime == types.RuntimeRemote || server.Runtime == types.RuntimeVMCP {
+		// Remove any existing deployment for remote and vMCP servers
 		return server, k.deployServerObjects(ctx, server, nil)
 	}
 
@@ -400,7 +400,7 @@ func (k *kubernetesBackend) shutdownServer(ctx context.Context, id string, hardS
 }
 
 func (k *kubernetesBackend) k8sObjects(ctx context.Context, server ServerConfig) ([]kclient.Object, error) {
-	if server.Runtime == types.RuntimeRemote || server.Runtime == types.RuntimeComposite {
+	if server.Runtime == types.RuntimeRemote || server.Runtime == types.RuntimeVMCP {
 		return nil, nil
 	}
 
@@ -994,7 +994,7 @@ func mcpContainerResourcesWithMaximums(serverSpecificResources *corev1.ResourceR
 // capped by ResourceMaximums; explicit K8s settings remain explicit and are
 // validated separately.
 func mcpContainerDefaultResources(runtime types.Runtime, agent bool, k8sSettings v1.K8sSettingsSpec) (corev1.ResourceRequirements, bool) {
-	if runtime == types.RuntimeRemote || runtime == types.RuntimeComposite {
+	if runtime == types.RuntimeRemote {
 		return memoryRequestResources(remoteMemoryRequest), true
 	}
 	if agent {

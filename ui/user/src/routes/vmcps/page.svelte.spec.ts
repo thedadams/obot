@@ -1,6 +1,11 @@
-import type { MCPCatalogEntry, MCPCatalogEntryServerManifest, ToolOverride } from '$lib/services';
+import type { MCPCatalogEntry, ToolOverride } from '$lib/services';
 import { mcpServersAndEntries } from '$lib/stores';
-import { createMCPCatalogEntry } from '../../tests/helpers/mcp';
+import {
+	createMCPCatalogEntry,
+	createVMCP,
+	createVMCPComponent,
+	type VMCPTestResource
+} from '../../tests/helpers/mcp';
 import { preparePageData } from '../../tests/helpers/pageData';
 import { worker } from '../../tests/mocks/worker';
 import VMcpsPage from './+page.svelte';
@@ -26,29 +31,84 @@ const toolOverrides: ToolOverride[] = [
 	{ name: 'list_issues', description: 'List issues', enabled: false }
 ];
 
-function createVMcp(overrides?: ToolOverride[]) {
-	return createMCPCatalogEntry({
-		id: 'vmcp-1',
-		name: 'Issue Tracker vMCP',
-		runtime: 'composite',
-		manifest: {
-			compositeConfig: {
-				componentServers: [
-					{
-						catalogEntryID: componentEntry.id,
-						manifest: componentEntry.manifest,
-						toolPrefix: 'github_',
-						...(overrides ? { toolOverrides: overrides } : {})
-					}
-				]
-			}
-		}
-	});
+const remoteToolPreview = [
+	{ id: 'search', name: 'search', description: 'Search records' },
+	{ id: 'list', name: 'list', description: 'List records' }
+];
+
+const remoteEntry = createMCPCatalogEntry({
+	id: 'entry-remote',
+	name: 'Remote Records',
+	runtime: 'remote',
+	manifest: { toolPreview: remoteToolPreview }
+});
+
+const remoteToolOverrides: ToolOverride[] = [
+	{
+		name: 'search',
+		overrideName: 'find_records',
+		overrideDescription: 'Find records',
+		enabled: true
+	},
+	{ name: 'list', description: 'List records', enabled: false }
+];
+
+function createVMcp(overrides?: ToolOverride[], id = 'vmcp-1') {
+	return createVMCP(
+		{
+			id,
+			displayName: id === 'vmcp-1' ? 'Issue Tracker vMCP' : `vMCP ${id.slice(5)}`,
+			components: [
+				createVMCPComponent(componentEntry, {
+					id: 'component-github',
+					toolPrefix: 'github_',
+					...(overrides ? { toolOverrides: overrides } : {})
+				})
+			]
+		},
+		[componentEntry]
+	);
 }
 
-async function renderVMcpsPage(vmcp: MCPCatalogEntry, extraEntries: MCPCatalogEntry[] = []) {
+function createRemoteVMcp(
+	overrides: ToolOverride[] = remoteToolOverrides,
+	toolPreview = remoteToolPreview
+) {
+	const entry = createMCPCatalogEntry({
+		id: 'entry-remote',
+		name: 'Remote Records',
+		runtime: 'remote',
+		manifest: { toolPreview }
+	});
+
+	return createVMCP(
+		{
+			id: 'vmcp-remote',
+			displayName: 'Remote Records vMCP',
+			components: [
+				createVMCPComponent(entry, {
+					id: 'component-remote',
+					toolPrefix: 'remote_',
+					toolOverrides: overrides
+				})
+			]
+		},
+		[entry]
+	);
+}
+
+async function renderVMcpsPage(
+	vmcp: VMCPTestResource,
+	extraEntries: ReturnType<typeof createMCPCatalogEntry>[] = [],
+	extraVMcps: VMCPTestResource[] = [],
+	catalogEntries: ReturnType<typeof createMCPCatalogEntry>[] = [componentEntry, ...extraEntries]
+) {
+	worker.use(
+		http.get('/api/vmcps', () => HttpResponse.json({ items: [vmcp, ...extraVMcps] })),
+		http.get(`/api/vmcps/${vmcp.id}`, () => HttpResponse.json(vmcp))
+	);
 	mcpServersAndEntries.current = {
-		entries: [componentEntry, vmcp, ...extraEntries],
+		entries: catalogEntries,
 		servers: [],
 		userInstances: [],
 		userConfiguredServers: [],
@@ -57,7 +117,11 @@ async function renderVMcpsPage(vmcp: MCPCatalogEntry, extraEntries: MCPCatalogEn
 		isInitialized: true
 	};
 	await preparePageData();
-	return render(VMcpsPage);
+	const rendered = render(VMcpsPage);
+	await expect
+		.element(page.getByRole('button', { name: `Edit ${vmcp.displayName}` }))
+		.toBeVisible();
+	return rendered;
 }
 
 async function expandServers(name = 'Issue Tracker vMCP', count = 1) {
@@ -70,19 +134,51 @@ function componentBlock() {
 	return page.getByRole('button', { name: componentEntry.manifest.name!, exact: true });
 }
 
-function mockUpdateEntry(vmcp: MCPCatalogEntry, onUpdate: (manifest: unknown) => void) {
+function editorRefreshButton() {
+	const editorDialog = page.getByCSS('dialog[open]').filter({
+		has: page.getByRole('button', { name: 'Confirm', exact: true })
+	});
+	return editorDialog.getByRole('button', { name: 'Refresh tools', exact: true });
+}
+
+function mockUpdateEntry(vmcp: VMCPTestResource, onUpdate: (manifest: unknown) => void) {
 	worker.use(
-		http.get(`/api/mcp-catalogs/default/entries/${vmcp.id}`, () => HttpResponse.json(vmcp)),
-		http.put(`/api/mcp-catalogs/default/entries/${vmcp.id}`, async ({ request }) => {
-			const manifest = (await request.json()) as MCPCatalogEntryServerManifest;
+		http.get(`/api/vmcps/${vmcp.id}`, () => HttpResponse.json(vmcp)),
+		http.put(`/api/vmcps/${vmcp.id}`, async ({ request }) => {
+			const manifest = (await request.json()) as Record<string, unknown>;
 			onUpdate(manifest);
-			return HttpResponse.json({ ...vmcp, manifest });
+			return HttpResponse.json({ ...vmcp, ...manifest });
 		})
 	);
 }
 
 function componentServersFrom(manifest: unknown) {
-	return (manifest as MCPCatalogEntryServerManifest).compositeConfig?.componentServers ?? [];
+	return (manifest as { components?: VMCPTestResource['components'] }).components ?? [];
+}
+
+function dispatchVisiblePage() {
+	const descriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+	if (document.visibilityState !== 'visible') {
+		Object.defineProperty(document, 'visibilityState', {
+			configurable: true,
+			value: 'visible'
+		});
+	}
+	document.dispatchEvent(new Event('visibilitychange'));
+
+	return () => {
+		if (descriptor) {
+			Object.defineProperty(document, 'visibilityState', descriptor);
+		} else {
+			Reflect.deleteProperty(document, 'visibilityState');
+		}
+	};
+}
+
+async function clickButton(locator: ReturnType<typeof page.getByRole>) {
+	const element = await locator.element();
+	if (!(element instanceof HTMLElement)) throw new Error('Expected a button element');
+	element.click();
 }
 
 function mockEntryDetails(entry: MCPCatalogEntry) {
@@ -133,13 +229,67 @@ async function pressCard(locator: ReturnType<typeof page.getByRole>, pointerId: 
 }
 
 describe('vMCPs Page', () => {
+	describe('first-class vMCP listing', () => {
+		it('loads vMCPs independently of composite entries in the catalog store', async () => {
+			await renderVMcpsPage(createVMcp(), [], [], []);
+
+			await expect
+				.element(page.getByRole('button', { name: 'Edit Issue Tracker vMCP' }))
+				.toBeVisible();
+			await expect.element(componentBlock()).toBeVisible();
+		});
+
+		it('keeps the personal vMCP filter available when it has no matches', async () => {
+			await renderVMcpsPage(createVMcp());
+
+			const personalOnly = page.getByRole('checkbox', { name: 'Show only my vMCPs' });
+			await personalOnly.click();
+			await expect.element(personalOnly).toBeChecked();
+			await expect
+				.element(page.getByRole('button', { name: 'Edit Issue Tracker vMCP' }))
+				.not.toBeInTheDocument();
+
+			await personalOnly.click();
+			await expect.element(personalOnly).not.toBeChecked();
+			await expect
+				.element(page.getByRole('button', { name: 'Edit Issue Tracker vMCP' }))
+				.toBeVisible();
+		});
+	});
+
 	describe('component with stored tool overrides', () => {
+		it('uses the cached snapshot preview for persisted tools', async () => {
+			const legacyPreview = vi.fn();
+			worker.use(
+				http.post(
+					`/api/mcp-catalogs/default/entries/${'vmcp-1'}/component-github/generate-tool-previews`,
+					() => {
+						legacyPreview();
+						return HttpResponse.json({});
+					}
+				)
+			);
+
+			await renderVMcpsPage(createVMcp(toolOverrides));
+			await componentBlock().click();
+
+			await expect
+				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
+				.toBeVisible();
+			await expect.element(page.getByText('create_issue').first()).toBeVisible();
+			await expect.element(page.getByText('list_issues').first()).toBeVisible();
+			await expect.element(page.getByCSS('#edit-tool-component-github-create_issue')).toBeVisible();
+			expect(legacyPreview).not.toHaveBeenCalled();
+		});
+
 		it('edits the stored overrides instead of running the tool setup flow', async () => {
 			await renderVMcpsPage(createVMcp(toolOverrides));
 
 			await componentBlock().click();
 
-			await expect.element(page.getByText('Configure GitHub Tools')).toBeVisible();
+			await expect
+				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
+				.toBeVisible();
 			await expect.element(page.getByText('create_issue').first()).toBeVisible();
 			await expect.element(page.getByText('list_issues').first()).toBeVisible();
 			// The prefix field has no accessible name, and the setup flow keeps a second copy of
@@ -148,10 +298,53 @@ describe('vMCPs Page', () => {
 				.element(page.getByCSS('dialog[open] input[placeholder="No prefix"]'))
 				.toHaveValue('github_');
 			await expect.element(page.getByRole('button', { name: 'Delete MCP Server' })).toBeVisible();
-			await expect.element(page.getByRole('button', { name: 'Refresh Tools' })).toBeVisible();
+			await expect.element(page.getByRole('button', { name: 'Refresh tools' })).toBeVisible();
 			await expect
-				.element(page.getByRole('button', { name: 'Get Started', exact: true }))
+				.element(page.getByRole('button', { name: 'Configure Tools', exact: true }))
 				.not.toBeInTheDocument();
+		});
+
+		it('keeps omitted and explicitly disabled saved tools disabled when reopened', async () => {
+			const savedOverrides: ToolOverride[] = [
+				{ name: 'create_issue', description: 'Create an issue', enabled: true },
+				{ name: 'list_issues', description: 'List issues' },
+				{ name: 'other_tool', description: 'Other tool', enabled: false }
+			];
+			const vmcp = createVMcp(savedOverrides);
+			const update = vi.fn();
+			mockUpdateEntry(vmcp, update);
+
+			await renderVMcpsPage(vmcp);
+			await componentBlock().click();
+
+			await expect
+				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
+				.toBeVisible();
+			const enabledTools = page.getByRole('checkbox', { name: 'Enabled' });
+			await expect.element(enabledTools.nth(0)).toBeChecked();
+			await expect.element(enabledTools.nth(1)).not.toBeChecked();
+			await expect.element(enabledTools.nth(2)).not.toBeChecked();
+
+			await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+			await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+			const updatedComponent = componentServersFrom(update.mock.calls[0][0])[0];
+			expect(updatedComponent.toolOverrides).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ name: 'create_issue', enabled: true }),
+					expect.objectContaining({ name: 'list_issues', enabled: false }),
+					expect.objectContaining({ name: 'other_tool', enabled: false })
+				])
+			);
+
+			await expect.element(page.getByCSS('dialog[open]')).not.toBeInTheDocument();
+			await componentBlock().click();
+			await expect
+				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
+				.toBeVisible();
+			const reopenedEnabledTools = page.getByRole('checkbox', { name: 'Enabled' });
+			await expect.element(reopenedEnabledTools.nth(0)).toBeChecked();
+			await expect.element(reopenedEnabledTools.nth(1)).not.toBeChecked();
+			await expect.element(reopenedEnabledTools.nth(2)).not.toBeChecked();
 		});
 
 		it('saves the edited overrides back onto the vMCP', async () => {
@@ -168,7 +361,9 @@ describe('vMCPs Page', () => {
 
 			await vi.waitFor(() => expect(update).toHaveBeenCalled());
 			expect(componentServersFrom(update.mock.calls[0][0])[0]).toMatchObject({
-				catalogEntryID: componentEntry.id,
+				id: 'component-github',
+				mcpCatalogID: 'default',
+				mcpServerCatalogEntryID: componentEntry.id,
 				toolPrefix: 'github_',
 				toolOverrides: [
 					{ name: 'create_issue', enabled: true },
@@ -177,15 +372,39 @@ describe('vMCPs Page', () => {
 			});
 		});
 
-		it('refreshes tools from the server through the setup flow', async () => {
-			await renderVMcpsPage(createVMcp(toolOverrides));
+		it('refreshes persisted tools through the vMCP endpoint without querying a source server', async () => {
+			const vmcp = createVMcp(toolOverrides);
+			const refreshPreview = vi.fn();
+			const legacyPreview = vi.fn();
+			worker.use(
+				http.post(
+					`/api/vmcps/${vmcp.id}/components/component-github/generate-tool-previews`,
+					() => {
+						refreshPreview();
+						return HttpResponse.json(componentEntry);
+					}
+				),
+				http.post(
+					`/api/mcp-catalogs/default/entries/${vmcp.id}/component-github/generate-tool-previews`,
+					() => {
+						legacyPreview();
+						return HttpResponse.json({});
+					}
+				)
+			);
+
+			await renderVMcpsPage(vmcp);
 
 			await componentBlock().click();
-			await page.getByRole('button', { name: 'Refresh' }).click();
+			const refreshButton = editorRefreshButton();
+			await expect.element(refreshButton).toBeVisible();
+			await clickButton(refreshButton);
 
 			await expect
-				.element(page.getByRole('button', { name: 'Get Started', exact: true }))
+				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
 				.toBeVisible();
+			expect(refreshPreview).toHaveBeenCalledOnce();
+			expect(legacyPreview).not.toHaveBeenCalled();
 		});
 	});
 
@@ -198,7 +417,7 @@ describe('vMCPs Page', () => {
 			await expect.element(page.getByRole('button', { name: 'Modify Tools' })).toBeVisible();
 			await expect.element(page.getByRole('button', { name: 'Delete MCP Server' })).toBeVisible();
 			await expect
-				.element(page.getByRole('button', { name: 'Get Started', exact: true }))
+				.element(page.getByRole('button', { name: 'Configure Tools', exact: true }))
 				.not.toBeInTheDocument();
 		});
 
@@ -209,12 +428,71 @@ describe('vMCPs Page', () => {
 			await page.getByRole('button', { name: 'Modify Tools' }).click();
 
 			await expect
-				.element(page.getByRole('button', { name: 'Get Started', exact: true }))
+				.element(page.getByRole('button', { name: 'Configure Tools', exact: true }))
 				.toBeVisible();
+		});
+
+		it('uses flattened catalog configuration for tool previews', async () => {
+			const entry = createMCPCatalogEntry({
+				id: 'entry-configured',
+				name: 'Configured Server',
+				manifest: {
+					config: [
+						{
+							key: 'TOKEN',
+							name: 'Token',
+							description: 'API token',
+							required: true,
+							sensitive: true,
+							value: '',
+							usage: 'env'
+						},
+						{
+							key: 'Authorization',
+							name: 'Authorization',
+							description: 'Authorization header',
+							required: true,
+							sensitive: true,
+							value: '',
+							usage: 'header'
+						}
+					]
+				}
+			});
+			const vmcp = createVMCP(
+				{
+					id: 'vmcp-configured',
+					displayName: 'Configured vMCP',
+					components: [createVMCPComponent(entry, { id: 'component-configured' })]
+				},
+				[entry]
+			);
+			const generatedTools = [
+				{ id: 'configured_tool', name: 'configured_tool', description: 'Uses configuration' }
+			];
+			worker.use(
+				http.post(
+					`/api/vmcps/${vmcp.id}/components/component-configured/generate-tool-previews`,
+					() =>
+						HttpResponse.json({
+							...entry,
+							manifest: { ...entry.manifest, toolPreview: generatedTools }
+						})
+				)
+			);
+
+			await renderVMcpsPage(vmcp, [entry], [], [entry]);
+			await page.getByRole('button', { name: 'Configured Server', exact: true }).click();
+			await page.getByRole('button', { name: 'Modify Tools' }).click();
+			await page.getByRole('button', { name: 'Configure Tools', exact: true }).click();
+
+			await expect.element(page.getByText('configured_tool', { exact: true })).toBeVisible();
 		});
 
 		it('removes the server from the vMCP without visiting the setup flow', async () => {
 			const vmcp = createVMcp();
+			const secondEntry = createMCPCatalogEntry({ id: 'entry-slack', name: 'Slack' });
+			vmcp.components.push(createVMCPComponent(secondEntry, { id: 'component-slack' }));
 			const update = vi.fn();
 			mockUpdateEntry(vmcp, update);
 
@@ -226,7 +504,244 @@ describe('vMCPs Page', () => {
 			await page.getByRole('button', { name: "Yes, I'm sure" }).click();
 
 			await vi.waitFor(() => expect(update).toHaveBeenCalled());
-			expect(componentServersFrom(update.mock.calls[0][0])).toEqual([]);
+			expect(componentServersFrom(update.mock.calls[0][0])).toHaveLength(1);
+			expect(componentServersFrom(update.mock.calls[0][0])[0]).toMatchObject({
+				id: 'component-slack',
+				mcpServerCatalogEntryID: secondEntry.id
+			});
+		});
+
+		describe('remote component tool refresh', () => {
+			it('prompts for OAuth and retries preview generation without widening saved tools', async () => {
+				const vmcp = createRemoteVMcp();
+				const generatedTools = [
+					...remoteToolPreview,
+					{
+						id: 'new_tool',
+						name: 'new_tool',
+						description: 'A newly discovered tool'
+					}
+				];
+				const generatePreview = vi.fn();
+				const oauthURL = 'https://remote.example/oauth/authorize';
+
+				worker.use(
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews`,
+						() => {
+							generatePreview();
+							if (generatePreview.mock.calls.length === 1) {
+								return HttpResponse.json(
+									{ error: 'MCP server requires OAuth authentication' },
+									{ status: 400 }
+								);
+							}
+							return HttpResponse.json({
+								...remoteEntry,
+								manifest: {
+									...remoteEntry.manifest,
+									toolPreview: generatedTools
+								}
+							});
+						}
+					),
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews/oauth-url`,
+						() => HttpResponse.json({ oauthURL })
+					)
+				);
+
+				await renderVMcpsPage(vmcp, [], [], [remoteEntry]);
+				await page.getByRole('button', { name: 'Remote Records', exact: true }).click();
+				await expect
+					.element(page.getByRole('heading', { name: 'Configure Remote Records Tools' }))
+					.toBeVisible();
+				const refreshButton = editorRefreshButton();
+				await expect.element(refreshButton).toBeVisible();
+				await clickButton(refreshButton);
+
+				await expect.element(page.getByRole('link', { name: 'Authenticate' })).toBeVisible();
+				await expect
+					.element(page.getByRole('link', { name: 'Authenticate' }))
+					.toHaveAttribute('href', oauthURL);
+				expect(generatePreview).toHaveBeenCalledOnce();
+
+				const restoreVisibility = dispatchVisiblePage();
+				try {
+					await expect
+						.element(page.getByRole('heading', { name: 'Configure Remote Records Tools' }))
+						.toBeVisible();
+					await expect.element(page.getByText('new_tool').first()).toBeVisible();
+					expect(generatePreview).toHaveBeenCalledTimes(2);
+
+					const enabledTools = page.getByRole('checkbox', { name: 'Enabled' });
+					await expect.element(enabledTools.nth(0)).toBeChecked();
+					await expect.element(enabledTools.nth(1)).not.toBeChecked();
+					await expect.element(enabledTools.nth(2)).not.toBeChecked();
+					await expect
+						.element(page.getByCSS('dialog[open] input[placeholder="No prefix"]'))
+						.toHaveValue('remote_');
+					await expect.element(page.getByText('find_records').first()).toBeVisible();
+				} finally {
+					restoreVisibility();
+				}
+			});
+
+			it('enables all tools from an initial remote preview without saved overrides', async () => {
+				const vmcp = createRemoteVMcp([], []);
+				const generatedTools = [
+					...remoteToolPreview,
+					{ id: 'new_tool', name: 'new_tool', description: 'A newly discovered tool' }
+				];
+				const generatePreview = vi.fn();
+
+				worker.use(
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews`,
+						() => {
+							generatePreview();
+							return HttpResponse.json({
+								...remoteEntry,
+								manifest: { ...remoteEntry.manifest, toolPreview: generatedTools }
+							});
+						}
+					),
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews/oauth-url`,
+						() => HttpResponse.json({ oauthURL: 'https://remote.example/oauth/authorize' })
+					)
+				);
+
+				await renderVMcpsPage(vmcp, [], [], [remoteEntry]);
+				await page.getByRole('button', { name: 'Remote Records', exact: true }).click();
+				await page.getByRole('button', { name: 'Modify Tools' }).click();
+				const configureButton = page.getByRole('button', {
+					name: 'Configure Tools',
+					exact: true
+				});
+				await expect.element(configureButton).toBeVisible();
+				await clickButton(configureButton);
+
+				await expect
+					.element(page.getByRole('heading', { name: 'Configure Remote Records Tools' }))
+					.toBeVisible();
+				await expect.element(page.getByText('new_tool').first()).toBeVisible();
+				expect(generatePreview).toHaveBeenCalledOnce();
+
+				const enabledTools = page.getByRole('checkbox', { name: 'Enabled' });
+				await expect.element(enabledTools.nth(0)).toBeChecked();
+				await expect.element(enabledTools.nth(1)).toBeChecked();
+				await expect.element(enabledTools.nth(2)).toBeChecked();
+			});
+
+			it('does not open the editor when the OAuth URL cannot be fetched', async () => {
+				const vmcp = createRemoteVMcp();
+				const getOauthURL = vi.fn();
+
+				worker.use(
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews`,
+						() =>
+							HttpResponse.json(
+								{ error: 'MCP server requires OAuth authentication' },
+								{ status: 400 }
+							)
+					),
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews/oauth-url`,
+						() => {
+							getOauthURL();
+							return HttpResponse.json({ error: 'OAuth URL unavailable' }, { status: 500 });
+						}
+					)
+				);
+
+				await renderVMcpsPage(vmcp, [], [], [remoteEntry]);
+				await page.getByRole('button', { name: 'Remote Records', exact: true }).click();
+				const refreshButton = editorRefreshButton();
+				await expect.element(refreshButton).toBeVisible();
+				await clickButton(refreshButton);
+
+				await vi.waitFor(() => expect(getOauthURL).toHaveBeenCalledOnce());
+				await expect
+					.element(page.getByRole('button', { name: 'Confirm', exact: true }))
+					.not.toBeInTheDocument();
+				await expect
+					.element(page.getByRole('link', { name: 'Authenticate' }))
+					.not.toBeInTheDocument();
+			});
+
+			it('does not reopen the editor after cancellation while OAuth preview is pending', async () => {
+				const vmcp = createRemoteVMcp();
+				let previewCalls = 0;
+				let resolveRetry: ((response: Response) => void) | undefined;
+
+				worker.use(
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews`,
+						() => {
+							previewCalls += 1;
+							if (previewCalls === 1) {
+								return HttpResponse.json(
+									{ error: 'MCP server requires OAuth authentication' },
+									{ status: 400 }
+								);
+							}
+							return new Promise<Response>((resolve) => {
+								resolveRetry = resolve;
+							});
+						}
+					),
+					http.post(
+						`/api/vmcps/${vmcp.id}/components/component-remote/generate-tool-previews/oauth-url`,
+						() =>
+							HttpResponse.json({
+								oauthURL: 'https://remote.example/oauth/authorize'
+							})
+					)
+				);
+
+				await renderVMcpsPage(vmcp, [], [], [remoteEntry]);
+				await page.getByRole('button', { name: 'Remote Records', exact: true }).click();
+				const refreshButton = editorRefreshButton();
+				await expect.element(refreshButton).toBeVisible();
+				await clickButton(refreshButton);
+				await expect.element(page.getByRole('link', { name: 'Authenticate' })).toBeVisible();
+
+				await page.getByRole('button', { name: 'Retry', exact: true }).click();
+				try {
+					await vi.waitFor(() => {
+						expect(previewCalls).toBe(2);
+						expect(resolveRetry).toBeDefined();
+					});
+
+					const openDialog = page.getByCSS('dialog[open]').first();
+					const dialogElement = await openDialog.element();
+					if (!(dialogElement instanceof HTMLDialogElement)) {
+						throw new Error('Expected the setup dialog to be open');
+					}
+					dialogElement.close();
+					await expect.element(page.getByCSS('dialog[open]')).not.toBeInTheDocument();
+
+					resolveRetry?.(
+						new Response(
+							JSON.stringify({
+								...remoteEntry,
+								manifest: {
+									...remoteEntry.manifest,
+									toolPreview: remoteToolPreview
+								}
+							}),
+							{ status: 200, headers: { 'Content-Type': 'application/json' } }
+						)
+					);
+					await new Promise((resolve) => setTimeout(resolve, 0));
+					expect(previewCalls).toBe(2);
+					await expect.element(page.getByCSS('dialog[open]')).not.toBeInTheDocument();
+				} finally {
+					resolveRetry?.(new Response('{}', { status: 200 }));
+				}
+			});
 		});
 	});
 
@@ -274,9 +789,67 @@ describe('vMCPs Page', () => {
 			pointer(el, 'pointerup', 13, to);
 
 			await vi.waitFor(() => expect(update).toHaveBeenCalled());
-			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toEqual({
-				catalogEntryID: slack.id,
-				manifest: slack.manifest
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toMatchObject({
+				name: slack.manifest.name,
+				mcpCatalogID: 'default',
+				mcpServerCatalogEntryID: slack.id,
+				catalogEntry: {
+					manifest: expect.objectContaining({
+						name: slack.manifest.name,
+						runtime: slack.manifest.runtime
+					}),
+					unsupportedTools: []
+				}
+			});
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).not.toHaveProperty(
+				'mcpServerID'
+			);
+		});
+
+		it('generates a source preview and stores it in the new component snapshot', async () => {
+			const vmcp = createVMcp();
+			const generatedTools = [
+				{ id: 'send_message', name: 'send_message', description: 'Send a message' }
+			];
+			const generated = {
+				...slack,
+				unsupportedTools: ['unsupported_tool'],
+				manifest: { ...slack.manifest, toolPreview: generatedTools }
+			};
+			const generatePreview = vi.fn();
+			const update = vi.fn();
+			mockUpdateEntry(vmcp, update);
+			worker.use(
+				http.post(
+					`/api/mcp-catalogs/default/entries/${slack.id}/generate-tool-previews`,
+					({ request }) => {
+						generatePreview(new URL(request.url));
+						return HttpResponse.json(generated);
+					}
+				)
+			);
+
+			// Render after registering the source-generation handler so the drag starts from a
+			// catalog entry without a preview and must use the source entry's endpoint.
+			await renderVMcpsPage(vmcp, [slack]);
+			const { el, to } = await dragSlackOntoVMcp(16);
+			pointer(el, 'pointerup', 16, to);
+
+			await vi.waitFor(() => expect(update).toHaveBeenCalled());
+			expect(generatePreview).toHaveBeenCalledOnce();
+			expect(generatePreview.mock.calls[0][0].searchParams.get('dryRun')).toBe('true');
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toMatchObject({
+				name: slack.manifest.name,
+				mcpCatalogID: 'default',
+				mcpServerCatalogEntryID: slack.id,
+				catalogEntry: {
+					manifest: {
+						name: slack.manifest.name,
+						runtime: slack.manifest.runtime,
+						toolPreview: generatedTools
+					},
+					unsupportedTools: ['unsupported_tool']
+				}
 			});
 		});
 
@@ -360,10 +933,18 @@ describe('vMCPs Page', () => {
 			pointer(el, 'pointerup', 21, to);
 
 			await vi.waitFor(() => expect(update).toHaveBeenCalled());
-			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toEqual({
-				catalogEntryID: slack.id,
-				manifest: slack.manifest
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toMatchObject({
+				name: slack.manifest.name,
+				mcpCatalogID: 'default',
+				mcpServerCatalogEntryID: slack.id,
+				catalogEntry: {
+					manifest: expect.objectContaining({ name: slack.manifest.name }),
+					unsupportedTools: []
+				}
 			});
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).not.toHaveProperty(
+				'mcpServerID'
+			);
 		});
 
 		it('lists the servers of the row that was clicked', async () => {
@@ -390,7 +971,7 @@ describe('vMCPs Page', () => {
 			await openDialog().getByRole('button', { name: 'Edit tools' }).click();
 
 			await expect
-				.element(page.getByRole('button', { name: 'Get Started', exact: true }))
+				.element(page.getByRole('button', { name: 'Configure Tools', exact: true }))
 				.toBeVisible();
 			await expect
 				.element(page.getByRole('button', { name: 'Modify Tools' }))
@@ -404,7 +985,9 @@ describe('vMCPs Page', () => {
 
 			await openDialog().getByRole('button', { name: 'Edit tools' }).click();
 
-			await expect.element(page.getByText('Configure GitHub Tools')).toBeVisible();
+			await expect
+				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
+				.toBeVisible();
 			await expect
 				.element(page.getByRole('button', { name: 'Modify Tools' }))
 				.not.toBeInTheDocument();
@@ -453,10 +1036,18 @@ describe('vMCPs Page', () => {
 			pointer(el, 'pointerup', 22, to);
 
 			await vi.waitFor(() => expect(update).toHaveBeenCalled());
-			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toEqual({
-				catalogEntryID: slack.id,
-				manifest: slack.manifest
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).toMatchObject({
+				name: slack.manifest.name,
+				mcpCatalogID: 'default',
+				mcpServerCatalogEntryID: slack.id,
+				catalogEntry: {
+					manifest: expect.objectContaining({ name: slack.manifest.name }),
+					unsupportedTools: []
+				}
 			});
+			expect(componentServersFrom(update.mock.calls[0][0]).at(-1)).not.toHaveProperty(
+				'mcpServerID'
+			);
 		});
 	});
 
@@ -471,24 +1062,8 @@ describe('vMCPs Page', () => {
 		});
 
 		it('lets the user expand more than one connector', async () => {
-			const extras = [2, 3, 4, 5, 6].map((n) =>
-				createMCPCatalogEntry({
-					id: `vmcp-${n}`,
-					name: `vMCP ${n}`,
-					runtime: 'composite',
-					manifest: {
-						compositeConfig: {
-							componentServers: [
-								{
-									catalogEntryID: componentEntry.id,
-									manifest: componentEntry.manifest
-								}
-							]
-						}
-					}
-				})
-			);
-			await renderVMcpsPage(createVMcp(), extras);
+			const extras = [2, 3, 4, 5, 6].map((n) => createVMcp(undefined, `vmcp-${n}`));
+			await renderVMcpsPage(createVMcp(), [], extras);
 
 			await expect
 				.element(page.getByRole('button', { name: 'Hide servers in Issue Tracker vMCP' }))

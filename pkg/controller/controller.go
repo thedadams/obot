@@ -9,6 +9,7 @@ import (
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/controller/data"
 	"github.com/obot-platform/obot/pkg/controller/handlers/adminworkspace"
+	"github.com/obot-platform/obot/pkg/controller/handlers/compositemigration"
 	"github.com/obot-platform/obot/pkg/controller/handlers/deployment"
 	"github.com/obot-platform/obot/pkg/controller/handlers/mcpcatalog"
 	"github.com/obot-platform/obot/pkg/controller/handlers/mdmassetsource"
@@ -124,6 +125,10 @@ func (c *Controller) PreStart(ctx context.Context) error {
 		return fmt.Errorf("failed to ensure auth providers and model providers: %w", err)
 	}
 
+	if err := compositemigration.New(c.services.GatewayClient).MigrateAll(ctx, c.services.StorageClient); err != nil {
+		return fmt.Errorf("failed to migrate composite MCP servers: %w", err)
+	}
+
 	return nil
 }
 
@@ -190,21 +195,22 @@ func reconcileObotMCPServer(ctx context.Context, storageClient kclient.Client, a
 
 		// Check OBOT_URL env var
 		var foundOBOTURLEntry bool
-		for i, env := range existing.Spec.Manifest.Env {
+		for i, env := range existing.Spec.Manifest.Config {
 			if env.Key == "OBOT_URL" {
 				foundOBOTURLEntry = true
 				if env.Value != internalURL {
-					existing.Spec.Manifest.Env[i].Value = internalURL
+					existing.Spec.Manifest.Config[i].Value = internalURL
 					needsUpdate = true
 				}
 			}
 		}
 		if !foundOBOTURLEntry {
-			existing.Spec.Manifest.Env = append(existing.Spec.Manifest.Env, types.MCPEnv{
+			existing.Spec.Manifest.Config = append(existing.Spec.Manifest.Config, types.MCPConfig{
 				Name:     "OBOT_URL",
 				Key:      "OBOT_URL",
 				Required: true,
 				Value:    internalURL,
+				Usage:    types.Env,
 			})
 			needsUpdate = true
 		}
@@ -240,14 +246,13 @@ func reconcileObotMCPServer(ctx context.Context, storageClient kclient.Client, a
 					Port:  8080,
 					Path:  "/mcp",
 				},
-				Env: []types.MCPEnv{
-					{
-						Name:     "OBOT_URL",
-						Key:      "OBOT_URL",
-						Required: true,
-						Value:    internalURL,
-					},
-				},
+				Config: []types.MCPConfig{{
+					Name:     "OBOT_URL",
+					Key:      "OBOT_URL",
+					Required: true,
+					Value:    internalURL,
+					Usage:    types.Env,
+				}},
 			},
 		},
 	}

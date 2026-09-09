@@ -111,24 +111,6 @@ describe('McpServersSidebar.svelte', () => {
 		await expect.element(card('Workspace Slack')).toBeVisible();
 	});
 
-	it('leaves out composite and multi-user servers, which cannot be dragged in', async () => {
-		const composite = createMCPCatalogEntry({
-			id: 'entry-composite',
-			name: 'Composite',
-			runtime: 'composite'
-		});
-		const multiUser = createMCPCatalogEntry({
-			id: 'entry-multi',
-			name: 'Multi User',
-			serverUserType: 'multiUser'
-		});
-		await renderSidebar({ entries: [github, composite, multiUser] });
-
-		await expect.element(card('GitHub')).toBeVisible();
-		await expect.element(card('Composite')).not.toBeInTheDocument();
-		await expect.element(card('Multi User')).not.toBeInTheDocument();
-	});
-
 	it('says so when nothing is left to show', async () => {
 		await renderSidebar({ entries: [] });
 

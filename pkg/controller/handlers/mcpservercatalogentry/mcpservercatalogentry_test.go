@@ -3,6 +3,7 @@ package mcpservercatalogentry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	gatewaytypes "github.com/obot-platform/obot/pkg/gateway/types"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	storagescheme "github.com/obot-platform/obot/pkg/storage/scheme"
+	"github.com/obot-platform/obot/pkg/system"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,245 +33,39 @@ type fakeCredentialClient struct {
 	deletes int
 }
 
-func TestDetectCompositeDriftMarksEntryNeedingUpdateWhenMultiUserComponentDrifts(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:           "Shared Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
+func TestStaticOAuthCredentialsRetainedForVMCPSnapshots(t *testing.T) {
+	for _, explicit := range []bool{true, false} {
+		t.Run(fmt.Sprint("explicit reference=", explicit), func(t *testing.T) {
+			entry := remoteEntry(true)
+			entry.Status.OAuthCredentialConfigured = true
+			component := types.VMCPComponent{
+				MCPServerCatalogEntryID: entry.Name,
+				CatalogEntry:            types.MCPServerCatalogEntrySnapshot{Manifest: entry.Spec.Manifest},
+			}
+			if explicit {
+				component.OAuthCredentialID = system.MCPOAuthCredentialName(entry.Name)
+			}
+			vmcp := &v1.VMCP{
+				Name:      "vmcp1retained",
+				Namespace: entry.Namespace,
+				Spec:      v1.VMCPSpec{Manifest: types.VMCPManifest{Components: []types.VMCPComponent{component}}},
+			}
+			storage := newFakeClient(entry, vmcp)
+			creds := &fakeCredentialClient{exists: true}
+			req := router.Request{Ctx: t.Context(), Client: storage, Object: entry}
+			require.NoError(t, removeOAuthCredentials(req, creds))
+			assert.Zero(t, creds.deletes)
+			// Editing the source away from static OAuth also must not revoke a snapshot's credential.
+			entry.Spec.Manifest.RemoteConfig.StaticOAuthRequired = false
+			require.NoError(t, storage.Update(t.Context(), entry))
+			require.NoError(t, reconcileOAuthCredential(req, creds))
+			assert.Zero(t, creds.deletes)
+			assert.Zero(t, creds.reveals)
+			require.NoError(t, storage.Delete(t.Context(), vmcp))
+			require.NoError(t, removeOAuthCredentials(req, creds))
+			assert.Equal(t, 1, creds.deletes)
+		})
 	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{
-				{
-					MCPServerID: "shared-server",
-					Manifest:    componentSnapshot,
-				},
-			},
-		},
-	})
-	sharedServer := newMCPServer("shared-server", types.MCPServerManifest{
-		Name:    "Shared Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:2.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	})
-
-	client := newFakeClient(compositeEntry, sharedServer)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.True(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftIgnoresCatalogOnlyComponentFields(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:    "Catalog Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{{
-				CatalogEntryID: "component-entry",
-				Manifest:       componentSnapshot,
-			}},
-		},
-	})
-	compositeEntry.Status.NeedsUpdate = true
-	componentEntry := newMCPServerCatalogEntry("component-entry", types.MCPServerCatalogEntryManifest{
-		EntryKey:       "catalog-only-entry-key",
-		Name:           "Catalog Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeSingleUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	})
-
-	client := newFakeClient(compositeEntry, componentEntry)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftIgnoresComponentUpgradeNote(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:    "Catalog Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{{
-				CatalogEntryID: "component-entry",
-				Manifest:       componentSnapshot,
-			}},
-		},
-	})
-	componentEntry := newMCPServerCatalogEntry("component-entry", componentSnapshot)
-	componentEntry.Spec.Manifest.UpgradeNote = "Review settings before upgrading."
-
-	client := newFakeClient(compositeEntry, componentEntry)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftIgnoresAdminAddedSecretBindings(t *testing.T) {
-	binding := &types.MCPSecretBinding{Name: "admin-secret", Key: "api-key", AdminAdded: true}
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:           "Shared Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-		Env: []types.MCPEnv{{
-			Key:       "API_KEY",
-			Name:      "API Key",
-			Required:  true,
-			Sensitive: true}},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{{
-				MCPServerID: "shared-server",
-				Manifest:    componentSnapshot,
-			}},
-		},
-	})
-	compositeEntry.Status.NeedsUpdate = true
-	sharedServer := newMCPServer("shared-server", types.MCPServerManifest{
-		Name:    "Shared Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-		Env: []types.MCPEnv{{
-			Key:           "API_KEY",
-			Name:          "API Key",
-			Required:      true,
-			Sensitive:     true,
-			SecretBinding: binding}},
-	})
-	client := newFakeClient(compositeEntry, sharedServer)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
-}
-
-func TestDetectCompositeDriftClearsEntryWhenMultiUserComponentMatches(t *testing.T) {
-	componentSnapshot := types.MCPServerCatalogEntryManifest{
-		Name:           "Shared Component",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	}
-	compositeEntry := newMCPServerCatalogEntry("composite-entry", types.MCPServerCatalogEntryManifest{
-		Name:    "Composite Entry",
-		Runtime: types.RuntimeComposite,
-		CompositeConfig: &types.CompositeCatalogConfig{
-			ComponentServers: []types.CatalogComponentServer{
-				{
-					MCPServerID: "shared-server",
-					Manifest:    componentSnapshot,
-				},
-			},
-		},
-	})
-	compositeEntry.Status.NeedsUpdate = true
-	sharedServer := newMCPServer("shared-server", types.MCPServerManifest{
-		Name:    "Shared Component",
-		Runtime: types.RuntimeContainerized,
-		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
-			Image: "example/component:1.0.0",
-			Port:  8080,
-			Path:  "/mcp",
-		},
-	})
-
-	client := newFakeClient(compositeEntry, sharedServer)
-	err := (&Handler{}).DetectCompositeDrift(router.Request{
-		Client:    client,
-		Ctx:       t.Context(),
-		Object:    compositeEntry,
-		Namespace: compositeEntry.Namespace,
-		Name:      compositeEntry.Name,
-	}, &router.ResponseWrapper{})
-	require.NoError(t, err)
-
-	var updated v1.MCPServerCatalogEntry
-	require.NoError(t, client.Get(t.Context(), router.Key(compositeEntry.Namespace, compositeEntry.Name), &updated))
-	assert.False(t, updated.Status.NeedsUpdate)
 }
 
 func newFakeClient(objects ...kclient.Object) kclient.WithWatch {
@@ -301,9 +97,8 @@ func newMCPServerCatalogEntry(name string, manifest types.MCPServerCatalogEntryM
 
 func TestEnsureUserCountMultiUserEntry(t *testing.T) {
 	entry := newMCPServerCatalogEntry("multi-entry", types.MCPServerCatalogEntryManifest{
-		Name:           "Multi User Template",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
+		Name:    "Multi User Template",
+		Runtime: types.RuntimeContainerized,
 		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
 			Image: "example/mcp:1.0.0",
 			Port:  8080,
@@ -319,6 +114,7 @@ func TestEnsureUserCountMultiUserEntry(t *testing.T) {
 	})
 	server1.Spec.MCPServerCatalogEntryName = entry.Name
 	server1.Spec.UserID = "admin1"
+	server1.Spec.MCPCatalogID = "default"
 	server1.Status.MCPServerInstanceUserCount = new(2)
 
 	server2 := newMCPServer("server-2", types.MCPServerManifest{
@@ -329,6 +125,7 @@ func TestEnsureUserCountMultiUserEntry(t *testing.T) {
 	})
 	server2.Spec.MCPServerCatalogEntryName = entry.Name
 	server2.Spec.UserID = "admin2"
+	server2.Spec.MCPCatalogID = "default"
 	server2.Status.MCPServerInstanceUserCount = new(1)
 
 	client := newFakeClient(entry, server1, server2)
@@ -348,9 +145,8 @@ func TestEnsureUserCountMultiUserEntry(t *testing.T) {
 
 func TestEnsureUserCountMultiUserEntryExcludesComposite(t *testing.T) {
 	entry := newMCPServerCatalogEntry("multi-entry", types.MCPServerCatalogEntryManifest{
-		Name:           "Multi User Template",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeMultiUser,
+		Name:    "Multi User Template",
+		Runtime: types.RuntimeContainerized,
 		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
 			Image: "example/mcp:1.0.0",
 			Port:  8080,
@@ -366,6 +162,7 @@ func TestEnsureUserCountMultiUserEntryExcludesComposite(t *testing.T) {
 	})
 	activeServer.Spec.MCPServerCatalogEntryName = entry.Name
 	activeServer.Spec.UserID = "admin1"
+	activeServer.Spec.MCPCatalogID = "default"
 	activeServer.Status.MCPServerInstanceUserCount = new(1)
 
 	compositeChild := newMCPServer("composite-child", types.MCPServerManifest{
@@ -376,6 +173,7 @@ func TestEnsureUserCountMultiUserEntryExcludesComposite(t *testing.T) {
 	})
 	compositeChild.Spec.MCPServerCatalogEntryName = entry.Name
 	compositeChild.Spec.UserID = "admin2"
+	compositeChild.Spec.MCPCatalogID = "default"
 	compositeChild.Spec.CompositeName = "parent-composite"
 	compositeChild.Status.MCPServerInstanceUserCount = new(1)
 
@@ -396,9 +194,8 @@ func TestEnsureUserCountMultiUserEntryExcludesComposite(t *testing.T) {
 
 func TestEnsureUserCountSingleUserEntryCountsUniqueServerUsers(t *testing.T) {
 	entry := newMCPServerCatalogEntry("single-entry", types.MCPServerCatalogEntryManifest{
-		Name:           "Single User Template",
-		Runtime:        types.RuntimeContainerized,
-		ServerUserType: types.ServerUserTypeSingleUser,
+		Name:    "Single User Template",
+		Runtime: types.RuntimeContainerized,
 		ContainerizedConfig: &types.ContainerizedRuntimeConfig{
 			Image: "example/mcp:1.0.0",
 			Port:  8080,
@@ -608,6 +405,7 @@ func TestReconcileOAuthCredential(t *testing.T) {
 			assert.Equal(t, tt.wantDeletes, creds.deletes, "credential deletes")
 			assert.Equal(t, tt.wantConfigured, stored.Status.OAuthCredentialConfigured)
 			if hadAnnotation {
+				assert.NotEmpty(t, stored.Annotations[v1.OAuthCredentialRevisionAnnotation], "dependent vMCPs must observe the completed recheck")
 				assert.NotContains(t, stored.Annotations, v1.MCPServerCatalogEntrySyncAnnotation,
 					"a completed recheck should clear the annotation")
 			}
@@ -645,6 +443,7 @@ func TestReconcileOAuthCredentialKeepsSyncAnnotationWhenRecheckFails(t *testing.
 	require.ErrorContains(t, err, "connection refused")
 	assert.Contains(t, stored.Annotations, v1.MCPServerCatalogEntrySyncAnnotation,
 		"annotation must survive a failed recheck so the next pass retries it")
+	assert.Empty(t, stored.Annotations[v1.OAuthCredentialRevisionAnnotation])
 }
 
 // The sync annotation is the only sign a credential exists on an entry the controller has not

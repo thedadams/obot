@@ -11,7 +11,7 @@
 		onCreate: () => void;
 	}
 
-	let { drag, embedded = false }: Props = $props();
+	let { drag, embedded = false, onCreate }: Props = $props();
 	let linked = $derived(drag.isLinked(CREATE_VMCP_DROP_ID));
 </script>
 
@@ -31,8 +31,7 @@
 			linked && 'border-primary'
 		)}
 		onclick={() => {
-			// onCreate();
-			// temporarily commented out, existing composite catalog entry cannot be created with empty componentServers
+			onCreate();
 		}}
 	>
 		<div class="p-4 size-full flex flex-col items-center justify-center">

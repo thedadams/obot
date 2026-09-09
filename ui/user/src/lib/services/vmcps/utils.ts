@@ -1,4 +1,11 @@
-import type { MCPCatalogEntry, MCPCatalogServer, OrgUser, RuntimeFormData } from '$lib/services';
+import type {
+	MCPCatalogEntry,
+	MCPCatalogServer,
+	OrgUser,
+	VMCP,
+	VMCPComponent,
+	VMCPManifest
+} from '$lib/services';
 import { AiClient } from '../user/constants';
 import {
 	COMPONENT_LABEL_SEPARATOR,
@@ -47,31 +54,30 @@ export function appendComponentLabel(
 }
 
 export const initVMcp = () => {
-	const formData: RuntimeFormData = {
-		categories: [''],
-		metadata: {},
-		name: '',
-		icon: '',
-		shortDescription: '',
-		env: [],
+	const manifest: VMCPManifest = {
+		components: [],
 		description: '',
-		serverUserType: 'singleUser',
-		runtime: 'composite',
-		resources: undefined,
-		npxConfig: undefined,
-		uvxConfig: undefined,
-		containerizedConfig: undefined,
-		remoteConfig: undefined,
-		remoteServerConfig: undefined,
-		multiUserConfig: undefined,
-		compositeConfig: { componentServers: [] }
+		displayName: '',
+		forceSingleUser: false,
+		icon: '',
+		profiles: [
+			{
+				name: 'default',
+				subjects: [{ type: 'selector', id: '*' }],
+				allowAllTools: true
+			}
+		]
 	};
-	return formData;
+	return manifest;
 };
 
 /** Personal servers belong to a power user's workspace rather than the shared catalog. */
-export function isWorkspaceOwned(entry: MCPCatalogEntry) {
-	return Boolean(entry.powerUserWorkspaceID || entry.powerUserID);
+export function isWorkspaceOwned(entry: MCPCatalogEntry | VMCP) {
+	return Boolean(
+		('powerUserWorkspaceID' in entry && entry.powerUserWorkspaceID) ||
+		('powerUserID' in entry && entry.powerUserID) ||
+		('userID' in entry && entry.userID)
+	);
 }
 
 export function parseSelectedFilterIds(selected: string) {
@@ -81,34 +87,29 @@ export function parseSelectedFilterIds(selected: string) {
 		.filter(Boolean);
 }
 
-function componentServerIds(entry: MCPCatalogEntry) {
-	return (entry.manifest.compositeConfig?.componentServers ?? [])
-		.map((component) => component.catalogEntryID ?? component.mcpServerID)
+function componentServerIds(entry: VMCP) {
+	return entry.components
+		.map((component) => component.mcpServerCatalogEntryID || component.id)
 		.filter((id): id is string => Boolean(id));
 }
 
-function componentServerCount(entry: MCPCatalogEntry) {
-	return entry.manifest.compositeConfig?.componentServers?.length ?? 0;
+function componentServerCount(entry: VMCP) {
+	return entry.components.length;
 }
 
 function sortFilterOptions(options: VMcpFilterOption[]) {
 	return options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }
 
-function matchesOwnerFilter(
-	entry: MCPCatalogEntry,
-	ownerString: string,
-	owners: Map<string, OrgUser>
-) {
+function matchesOwnerFilter(entry: VMCP, ownerString: string, owners: Map<string, OrgUser>) {
 	const query = ownerString.trim().toLowerCase();
 	if (!query) return false;
 	const hasMatch = (user: OrgUser) =>
 		user.username.toLowerCase().includes(query) ||
 		user.email.toLowerCase().includes(query) ||
 		Boolean(user.displayName?.toLowerCase().includes(query));
-	const poweruser = entry.powerUserID && owners.get(entry.powerUserID);
 	const owner = entry.userID && owners.get(entry.userID);
-	return Boolean((poweruser && hasMatch(poweruser)) || (owner && hasMatch(owner)));
+	return Boolean(owner && hasMatch(owner));
 }
 
 function selectedVMcpFilterIds(filters: VMcpFilters) {
@@ -121,7 +122,7 @@ function selectedVMcpFilterIds(filters: VMcpFilters) {
 
 /** True when no filters are selected, or when the entry matches any selected filter (OR). */
 export function matchesVMcpFilters(
-	entry: MCPCatalogEntry,
+	entry: VMCP,
 	filters: VMcpFilters,
 	owners: Map<string, OrgUser>
 ) {
@@ -134,51 +135,53 @@ export function matchesVMcpFilters(
 	);
 }
 
-export function filterVMcps(
-	entries: MCPCatalogEntry[],
-	filters: VMcpFilters,
-	owners: Map<string, OrgUser>
-) {
+export function filterVMcps(entries: VMCP[], filters: VMcpFilters, owners: Map<string, OrgUser>) {
 	const { nameIds, ownerString, componentIds } = selectedVMcpFilterIds(filters);
 	if (nameIds.length === 0 && !ownerString && componentIds.length === 0) return entries;
 	return entries.filter((entry) => matchesVMcpFilters(entry, filters, owners));
 }
 
 export function buildVMcpComponentFilterOptions(
-	entries: MCPCatalogEntry[],
+	entries: VMCP[],
 	componentName?: (id: string) => string | undefined
 ): VMcpFilterOption[] {
 	const options: VMcpFilterOption[] = [];
 	const seen = new Set<string>();
 	for (const entry of entries) {
-		for (const component of entry.manifest.compositeConfig?.componentServers ?? []) {
-			const id = component.catalogEntryID ?? component.mcpServerID;
+		for (const component of entry.components) {
+			const id = component.mcpServerCatalogEntryID || component.id;
 			if (!id || seen.has(id)) continue;
 			seen.add(id);
 			options.push({
 				id,
-				label: componentName?.(id) || component.manifest?.name || id
+				label: componentName?.(id) || component.catalogEntry?.manifest?.name || component.name || id
 			});
 		}
 	}
 	return sortFilterOptions(options);
 }
 
-function compareNames(a: MCPCatalogEntry, b: MCPCatalogEntry) {
-	return (a.manifest.name ?? '').localeCompare(b.manifest.name ?? '', undefined, {
+function compareVMcpNames(a: VMCP, b: VMCP) {
+	return (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, {
 		sensitivity: 'base'
 	});
 }
 
-export function sortVMcps(entries: MCPCatalogEntry[], sortBy: VMcpSortBy) {
+export function sortVMcps(entries: VMCP[], sortBy: VMcpSortBy) {
 	return [...entries].sort((a, b) => {
 		if (sortBy === 'created') {
-			return (b.created ?? '').localeCompare(a.created ?? '') || compareNames(a, b);
+			return (b.created ?? '').localeCompare(a.created ?? '') || compareVMcpNames(a, b);
 		}
 		if (sortBy === 'componentServers') {
-			return componentServerCount(b) - componentServerCount(a) || compareNames(a, b);
+			return componentServerCount(b) - componentServerCount(a) || compareVMcpNames(a, b);
 		}
-		return compareNames(a, b);
+		return compareVMcpNames(a, b);
+	});
+}
+
+function compareNames(a: MCPCatalogEntry, b: MCPCatalogEntry) {
+	return (a.manifest.name ?? '').localeCompare(b.manifest.name ?? '', undefined, {
+		sensitivity: 'base'
 	});
 }
 
@@ -265,8 +268,14 @@ export function buildMcpServerFilterOptions(entries: MCPCatalogEntry[]): VMcpFil
 	return options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }
 
-export function matchesQuery(item: MCPCatalogEntry | MCPCatalogServer, query: string) {
+export function matchesQuery(item: MCPCatalogEntry | MCPCatalogServer | VMCP, query: string) {
 	const needle = query.toLowerCase();
+	if ('displayName' in item) {
+		return Boolean(
+			item.displayName?.toLowerCase().includes(needle) ||
+			item.description?.toLowerCase().includes(needle)
+		);
+	}
 	const { name, description, shortDescription } = item.manifest;
 	return Boolean(
 		name?.toLowerCase().includes(needle) ||
@@ -325,25 +334,31 @@ export function buildWirePath(from: Point, to: Point, phase = 0) {
 }
 
 export function resolveVMcpComponents(
-	vmcp: MCPCatalogEntry,
-	entries: MCPCatalogEntry[],
-	servers: MCPCatalogServer[]
+	vmcp: VMCP,
+	_entries: MCPCatalogEntry[] = [],
+	_servers: MCPCatalogServer[] = []
 ): VMcpComponentView[] {
-	return (vmcp.manifest.compositeConfig?.componentServers ?? []).map((component, index) => {
-		const entry = entries.find((candidate) => candidate.id === component.catalogEntryID);
-		const server = servers.find((candidate) => candidate.id === component.mcpServerID);
-		const manifest = entry?.manifest ?? server?.manifest ?? component.manifest;
-		const reference = component.catalogEntryID ?? component.mcpServerID;
+	return vmcp.components.map((component: VMCPComponent, index) => {
+		const manifest = component.catalogEntry?.manifest;
+		const reference = component.id || component.mcpServerCatalogEntryID;
 		return {
 			key: reference ?? `component-${index}`,
-			name: manifest?.name || reference || 'Unknown server',
+			name: component.name || manifest?.name || reference || 'Unknown server',
 			icon: manifest?.icon,
-			description: manifest?.shortDescription,
+			description: manifest?.shortDescription || manifest?.description,
 			id: reference,
 			toolOverrides: component.toolOverrides,
 			toolPreview: manifest?.toolPreview
 		};
 	});
+}
+
+/** The normal client connection endpoint for a virtual MCP. */
+export function vmcpConnectURL(vmcp: VMCP) {
+	const link = vmcp.links?.connectURL || vmcp.links?.['mcp-connect'];
+	if (link) return link;
+	const origin = typeof window !== 'undefined' ? window.location.origin : '';
+	return `${origin}/mcp-connect/${encodeURIComponent(vmcp.id)}`;
 }
 
 function mcpConfigKey(name: string, id: string, used: Set<string>) {
@@ -355,13 +370,13 @@ function mcpConfigKey(name: string, id: string, used: Set<string>) {
 	return key;
 }
 
-function httpMcpServers(vmcps: MCPCatalogEntry[]) {
+function httpMcpServers(vmcps: VMCP[]) {
 	const used = new Set<string>();
 	const servers: Record<string, { type: 'http'; url: string }> = {};
 	for (const vmcp of vmcps) {
-		const url = vmcp.connectURL;
+		const url = vmcpConnectURL(vmcp);
 		if (!url) continue;
-		servers[mcpConfigKey(vmcp.manifest.name ?? vmcp.id, vmcp.id, used)] = {
+		servers[mcpConfigKey(vmcp.displayName || vmcp.id, vmcp.id, used)] = {
 			type: 'http',
 			url
 		};
@@ -376,7 +391,7 @@ function toTomlQuotedKey(name: string) {
 
 export function buildConnectAllSnippets(
 	clientId: AiClient,
-	vmcps: MCPCatalogEntry[],
+	vmcps: VMCP[],
 	admin: boolean
 ): { id: string; label: string; value: string }[] {
 	const servers = httpMcpServers(vmcps);
