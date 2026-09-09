@@ -121,7 +121,6 @@
 	let restartableConfiguredServers = $derived(
 		configuredServers.filter((server) => supportsMCPBackendDetails(server))
 	);
-
 	// Connecting from a multi-user catalog entry row always starts a new shared server deployment.
 	let isMultiUserCatalogEntryRow = $derived(isMultiUserCatalogEntry(entry) && !server);
 	let requiresUpdate = $derived(server && requiresUserUpdate(server));
@@ -227,7 +226,6 @@
 			true;
 		return entryCanConnect && serverCanConnect;
 	});
-
 	let requiresStaticOAuth = $derived(
 		entry?.manifest?.runtime === 'remote' && entry?.manifest?.remoteConfig?.staticOAuthRequired
 	);
@@ -237,6 +235,26 @@
 		oauthConfiguredOverride !== undefined
 			? oauthConfiguredOverride
 			: !requiresStaticOAuth || entry?.oauthCredentialConfigured
+	);
+	let showConnectButton = $derived(
+		!belongsToComposite &&
+			!hideActions &&
+			Boolean(
+				(entry && !server) ||
+				(server &&
+					(isMultiUserServer(server) ||
+						!server.catalogEntryID ||
+						(server.catalogEntryID && server.userID === profile.current.id)))
+			)
+	);
+	let connectionDisabled = $derived(
+		Boolean(
+			loading ||
+			hasLicenseEntitlementViolations ||
+			(isMultiUserCatalogEntryRow && !catalogID && !workspaceID) ||
+			!canConnect ||
+			(requiresStaticOAuth && oauthConfigured === false)
+		)
 	);
 
 	function refresh() {
@@ -312,13 +330,7 @@
 <div class="contents" class:hidden={belongsToComposite || hideActions}>
 	<button
 		class="btn btn-primary flex w-full items-center gap-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 md:w-fit"
-		class:hidden={!(
-			(entry && !server) ||
-			(server &&
-				(isMultiUserServer(server) ||
-					!server.catalogEntryID ||
-					(server.catalogEntryID && server.userID === profile.current.id)))
-		)}
+		class:hidden={!showConnectButton}
 		use:tooltip={{
 			text: hasLicenseEntitlementViolations
 				? MCP_CONNECTION_INVALID_LICENSE_MESSAGE
@@ -361,11 +373,7 @@
 				});
 			}
 		}}
-		disabled={loading ||
-			hasLicenseEntitlementViolations ||
-			(isMultiUserCatalogEntryRow && !catalogID && !workspaceID) ||
-			!canConnect ||
-			(requiresStaticOAuth && oauthConfigured === false)}
+		disabled={connectionDisabled}
 	>
 		{#if loading}
 			<Loading class="size-4" />
