@@ -13,6 +13,7 @@
 	import LicenseView from './LicenseView.svelte';
 	import McpConfigView from './McpConfigView.svelte';
 	import NotificationsView from './NotificationsView.svelte';
+	import ProductAnalyticsView from './ProductAnalyticsView.svelte';
 	import RegistryConnectionsView from './RegistryConnectionsView.svelte';
 	import { Plus } from '@lucide/svelte';
 	import { untrack } from 'svelte';
@@ -45,6 +46,9 @@
 		{ label: 'License', value: 'license', content: license },
 		{ label: 'Branding', value: 'branding', content: branding },
 		{ label: 'Notifications', value: 'notifications', content: notifications },
+		...(data.productTelemetryConsentAvailable === true && profile.current.isAdmin?.()
+			? [{ label: 'Product Analytics', value: 'product-analytics', content: productAnalytics }]
+			: []),
 		...(version.current.engine === 'kubernetes' && !version.current.hideK8sDetails
 			? [{ label: 'MCP Config', value: 'mcp-config', content: mcpConfig }]
 			: []),
@@ -131,6 +135,10 @@
 
 {#snippet notifications()}
 	<NotificationsView appNotification={data.appNotification} />
+{/snippet}
+
+{#snippet productAnalytics()}
+	<ProductAnalyticsView consent={data.productTelemetryConsent ?? {}} />
 {/snippet}
 
 {#snippet mcpConfig()}
