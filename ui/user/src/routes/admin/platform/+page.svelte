@@ -4,7 +4,7 @@
 	import TabLayout from '$lib/components/TabLayout.svelte';
 	import GitCredentialsView from '$lib/components/admin/GitCredentialsView.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
-	import type { ImagePullSecret, ImagePullSecretCapability } from '$lib/services';
+	import type { GitCredential, ImagePullSecret, ImagePullSecretCapability } from '$lib/services';
 	import { profile, version } from '$lib/stores';
 	import { compileAppPreferences } from '$lib/stores/appPreferences.svelte';
 	import { goto } from '$lib/url';
@@ -26,7 +26,9 @@
 		untrack(() => data.capability ?? { available: false })
 	);
 	let imagePullSecrets = $state<ImagePullSecret[]>(untrack(() => data.imagePullSecrets ?? []));
+	let credentials = $state<GitCredential[]>(untrack(() => data.gitCredentials ?? []));
 	let registryView = $state<ReturnType<typeof RegistryConnectionsView>>();
+	let gitCredentialsView = $state<ReturnType<typeof GitCredentialsView>>();
 	let isAdminReadonly = $derived(profile.current.isAdminReadonly?.());
 	let creatingRegistryConnection = $derived(
 		page.url.searchParams.get('view') === 'registry-connections' &&
@@ -61,6 +63,10 @@
 	$effect(() => {
 		capability = data.capability ?? { available: false };
 		imagePullSecrets = data.imagePullSecrets ?? [];
+	});
+
+	$effect(() => {
+		credentials = data.gitCredentials ?? [];
 	});
 
 	function hideRegistryForm() {
@@ -104,6 +110,14 @@
 			<Plus class="size-4" />
 			Create New Secret
 		</button>
+	{:else if view === 'git-credentials' && !isAdminReadonly}
+		<button
+			class="btn btn-primary flex items-center gap-2 text-sm"
+			onclick={() => gitCredentialsView?.openCreate()}
+		>
+			<Plus class="size-4" />
+			Create Git Credential
+		</button>
 	{/if}
 {/snippet}
 
@@ -128,5 +142,5 @@
 {/snippet}
 
 {#snippet gitCredentials()}
-	<GitCredentialsView gitCredentials={data.gitCredentials} />
+	<GitCredentialsView bind:this={gitCredentialsView} bind:gitCredentials={credentials} />
 {/snippet}

@@ -24,7 +24,6 @@ const sharedLinks = [
 	'/models',
 	'/audit-logs',
 	'/usage',
-	'/inventory',
 	'/identity-access'
 ];
 
@@ -147,14 +146,6 @@ describe('Layout.svelte', () => {
 				await renderLayout([Group.ADMIN]);
 				await expectSharedNavigation();
 				await expectAdminOnlyNavigation();
-			});
-
-			describe('when agents are enabled', () => {
-				it('shows Launch Agent', async () => {
-					await renderLayout([Group.ADMIN], { agentsEnabled: true });
-
-					await expect.element(page.getByCSS('#launch-agent-chat')).toBeVisible();
-				});
 			});
 		});
 

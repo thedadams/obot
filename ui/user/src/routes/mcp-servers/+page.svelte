@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import DotDotDot from '$lib/components/DotDotDot.svelte';
 	import Layout from '$lib/components/Layout.svelte';
@@ -37,8 +36,9 @@
 	import McpPoliciesView from './McpPoliciesView.svelte';
 	import SourceUrlsView from './SourceUrlsView.svelte';
 	import TunnelsView from './TunnelsView.svelte';
-	import { Plus, RefreshCcw, Server, Settings } from '@lucide/svelte';
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { getCreatedEntryUrl } from './utils';
+	import { Plus, RefreshCcw, Server } from '@lucide/svelte';
+	import { onDestroy, onMount } from 'svelte';
 
 	const defaultCatalogId = DEFAULT_MCP_CATALOG_ID;
 	const viewValues = [
@@ -64,7 +64,7 @@
 	let sourceDialog = $state<ReturnType<typeof McpServerGitSync>>();
 	let selectServerTypeDialog = $state<ReturnType<typeof SelectServerType>>();
 	let filtersTab = $state<ReturnType<typeof FiltersView>>();
-	let gitCredentials = $state(untrack(() => data.gitCredentials));
+	let gitCredentials = $derived(data.gitCredentials);
 	let filtersLoading = $state(false);
 	let syncing = $state(false);
 	let syncInterval = $state<ReturnType<typeof setInterval>>();
@@ -123,9 +123,9 @@
 		...(hasAdminAccess
 			? [
 					{ label: 'Sources', value: 'sources', content: sources },
+					{ label: 'Deployments', value: 'deployments', content: deployments },
 					{ label: 'Filters', value: 'filters', content: filters },
-					{ label: 'Tunnels', value: 'tunnels', content: tunnels },
-					{ label: 'Deployments', value: 'deployments', content: deployments }
+					{ label: 'Tunnels', value: 'tunnels', content: tunnels }
 				]
 			: []),
 		...(isPowerUserPlus || hasAdminAccess
@@ -206,6 +206,10 @@
 		goto(`${page.url.pathname}?view=${view}&new=${value}`);
 	}
 
+	function handleEntryCreated(id: string, _isMultiUserEntry: boolean, message?: string) {
+		goto(getCreatedEntryUrl(id, newServerType, message), { replaceState: true });
+	}
+
 	onDestroy(() => {
 		if (syncInterval) {
 			clearInterval(syncInterval);
@@ -225,6 +229,7 @@
 				id={hasAdminAccess ? defaultCatalogId : (workspaceId ?? '')}
 				type={newServerType}
 				onCancel={closeCreateScreen}
+				onSubmit={handleEntryCreated}
 				excludeViews={['overview']}
 			/>
 		{:else if selectedView === 'filters'}
@@ -263,12 +268,6 @@
 				Sync
 			{/if}
 		</button>
-		<a
-			class="btn btn-secondary flex items-center gap-1 text-sm"
-			href={resolve('/admin/platform?view=git-credentials')}
-		>
-			<Settings class="size-4" /> Manage Credentials
-		</a>
 		<button
 			id="add-catalog-source-button"
 			class="btn btn-primary btn-block w-full text-sm md:w-52"

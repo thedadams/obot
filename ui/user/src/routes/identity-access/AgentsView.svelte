@@ -110,10 +110,10 @@
 				<h4 class="text-muted-content text-lg font-semibold">No Agent Identities</h4>
 				<p class="text-muted-content text-sm font-light">
 					{isAdmin
-						? "Looks like there aren't any agent auth scopes in the system yet."
-						: "Looks like you don't have any agent auth scopes yet!"}
+						? "Looks like there aren't any agent identities in the system yet."
+						: "Looks like you don't have any agent identities yet!"}
 					<br />
-					Click the "Create Agent Auth Scope" button above to get started.
+					Click the "Create Agent Identity" button above to get started.
 				</p>
 
 				{#if !isAdmin}
@@ -126,7 +126,7 @@
 							<p class="whitespace-pre-line text-left text-sm font-light">
 								{AUTH_SCOPE_DESCRIPTION}
 								<button class="text-link inline" onclick={showCreateForm}
-									>Create your first auth scope</button
+									>Create your first agent identity</button
 								>
 							</p>
 						</div>
