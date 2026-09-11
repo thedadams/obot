@@ -29,7 +29,6 @@
 		setFilterUrlParams,
 		setSortUrlParams
 	} from '$lib/url';
-	import ConnectorsView from './ConnectorsView.svelte';
 	import DeploymentsView from './DeploymentsView.svelte';
 	import EntriesView from './EntriesView.svelte';
 	import FiltersView from './FiltersView.svelte';
@@ -116,9 +115,8 @@
 		}
 	});
 	let views = $derived([
-		{ label: 'Servers', value: 'servers', content: servers },
 		...(hasAdminAccess || isPowerUser
-			? [{ label: 'Entries', value: 'entries', content: entries }]
+			? [{ label: 'Servers', value: 'servers', content: servers }]
 			: []),
 		...(hasAdminAccess
 			? [
@@ -251,13 +249,13 @@
 {/if}
 
 {#snippet navActions(view: string)}
-	{#if view === 'entries' && canCreateEntry && !isAdminReadonly}
+	{#if view === 'servers' && canCreateEntry && !isAdminReadonly}
 		<button
 			class="btn btn-primary btn-block w-full text-sm md:w-52"
 			id="add-catalog-entry-button"
 			onclick={() => selectServerTypeDialog?.open()}
 		>
-			<Plus class="size-4" /> Add Catalog Entry
+			<Plus class="size-4" /> Add MCP Server
 		</button>
 	{:else if view === 'sources' && hasAdminAccess && !isAdminReadonly}
 		<button class="btn btn-secondary flex items-center gap-1 text-sm" onclick={sync}>
@@ -273,7 +271,7 @@
 			class="btn btn-primary btn-block w-full text-sm md:w-52"
 			onclick={() => sourceDialog?.open()}
 		>
-			<Plus class="size-4" /> Add Catalog Source
+			<Plus class="size-4" /> Add Source URL
 		</button>
 	{:else if view === 'filters' && !isAdminReadonly}
 		{#if filtersLoading}
@@ -326,7 +324,7 @@
 	{/if}
 {/snippet}
 
-{#snippet entries()}
+{#snippet servers()}
 	<EntriesView
 		entity={profile.current.hasAdminAccess?.() ? 'catalog' : 'workspace'}
 		id={profile.current.hasAdminAccess?.() ? defaultCatalogId : (workspaceId ?? '')}
@@ -342,10 +340,6 @@
 	>
 		{#snippet noDataContent()}{@render displayNoData()}{/snippet}
 	</EntriesView>
-{/snippet}
-
-{#snippet servers()}
-	<ConnectorsView {workspaceId} />
 {/snippet}
 
 {#snippet sources()}

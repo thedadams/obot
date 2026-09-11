@@ -61,6 +61,7 @@
 		type Layout as LayoutState
 	} from '$lib/context/layout.svelte';
 	import { localState } from '$lib/runes/localState.svelte';
+	import { Group } from '$lib/services';
 	import {
 		license as licenseStore,
 		profile,
@@ -215,6 +216,7 @@
 
 	let hostedAgentsFeatureEnabled = $derived(version.current.hostedAgentsEnabled === true);
 	let isBootStrapUser = $derived(profile.current.isBootstrapUser?.() ?? false);
+	let isAtLeastPoweruser = $derived(profile.current.groups.includes(Group.POWERUSER));
 
 	let hasLicenseEntitlementViolations = $derived(
 		(version.current.licenseEntitlementViolations?.length ?? 0) > 0
@@ -235,16 +237,20 @@
 			label: 'AI Resources',
 			collapsible: true,
 			items: [
-				// {
-				// 	id: 'vmcp',
-				// 	label: 'vMCPs',
-				// 	href: '/vmcps'
-				// },
 				{
-					id: 'mcp-servers',
-					label: 'MCP Servers',
-					href: '/mcp-servers'
+					id: 'vmcp',
+					label: 'vMCPs',
+					href: '/vmcps'
 				},
+				...(isAtLeastPoweruser || profile.current.hasAdminAccess?.()
+					? [
+							{
+								id: 'mcp-servers',
+								label: 'MCP Servers',
+								href: '/mcp-servers'
+							}
+						]
+					: []),
 				{
 					id: 'skills',
 					label: 'Skills',
@@ -694,6 +700,7 @@
 	{#if showBackButton}
 		<IconButton
 			class="btn btn-square btn-ghost shrink-0"
+			tooltip={{ text: 'Back' }}
 			onclick={() => {
 				if (onBackButtonClick) {
 					onBackButtonClick();

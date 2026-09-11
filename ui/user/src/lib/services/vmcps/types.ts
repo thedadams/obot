@@ -28,10 +28,13 @@ export type RowContext = {
 
 export type VMcpSortBy = 'name' | 'created' | 'componentServers';
 
+export type VMcpConnectOptions = {
+	onConnected?: () => void;
+};
+
 export type VMcpFilterOption = { id: string; label: string; disabled?: boolean };
 
 export type VMcpFilters = {
-	names?: string;
-	owners?: string;
+	query?: string;
 	components?: string;
 };

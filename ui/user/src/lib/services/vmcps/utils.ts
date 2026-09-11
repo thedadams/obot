@@ -1,12 +1,16 @@
+import { DEFAULT_MCP_CATALOG_ID } from '$lib/constants';
 import type {
 	MCPCatalogEntry,
 	MCPCatalogServer,
+	MCPConfig,
 	OrgUser,
 	VMCP,
 	VMCPComponent,
-	VMCPManifest
+	VMCPManifest,
+	VMCPProfile
 } from '$lib/services';
 import { AiClient } from '../user/constants';
+import { getManifestConfiguration } from '../user/mcp';
 import {
 	COMPONENT_LABEL_SEPARATOR,
 	MCP_SERVER_POPULARITY_ORDER,
@@ -53,23 +57,73 @@ export function appendComponentLabel(
 	return maxLength ? next.slice(0, maxLength) : next;
 }
 
-export const initVMcp = () => {
-	const manifest: VMCPManifest = {
-		components: [],
-		description: '',
-		displayName: '',
-		forceSingleUser: false,
-		icon: '',
-		profiles: [
-			{
-				name: 'default',
-				subjects: [{ type: 'selector', id: '*' }],
-				allowAllTools: true
-			}
-		]
-	};
-	return manifest;
+export type VMcpFormData = {
+	displayName: string;
+	description: string;
 };
+
+export const initVMcp = (): VMcpFormData => ({
+	displayName: '',
+	description: ''
+});
+
+export function vmcpConnectURL(vmcp: VMCP) {
+	const link = vmcp.links?.connectURL || vmcp.links?.['mcp-connect'];
+	if (link) return link;
+	const origin = typeof window !== 'undefined' ? window.location.origin : '';
+	return `${origin}/mcp-connect/${encodeURIComponent(vmcp.id)}`;
+}
+
+export function vmcpManifest(vmcp: VMCP): VMCPManifest {
+	return {
+		displayName: vmcp.displayName,
+		description: vmcp.description,
+		icon: vmcp.icon,
+		components: vmcp.components ?? [],
+		profiles: vmcp.profiles,
+		forceSingleUser: vmcp.forceSingleUser
+	};
+}
+
+export function catalogEntryToVMCPComponent(entry: MCPCatalogEntry): VMCPComponent {
+	return {
+		name: entry.manifest.name ?? entry.id,
+		mcpCatalogID: DEFAULT_MCP_CATALOG_ID,
+		mcpServerCatalogEntryID: entry.id,
+		catalogEntry: {
+			manifest: entry.manifest,
+			unsupportedTools: entry.unsupportedTools
+		}
+	};
+}
+
+export function catalogConfigurationFields(entry: MCPCatalogEntry): MCPConfig[] {
+	if (entry.manifest.config?.length) {
+		return entry.manifest.config;
+	}
+
+	const { env, headers } = getManifestConfiguration(entry.manifest);
+	return [
+		...env.map((field) => ({
+			...field,
+			usage: (field.dynamicFile
+				? 'dynamicFile'
+				: field.file
+					? 'file'
+					: field.interpolated
+						? 'interpolated'
+						: 'env') as MCPConfig['usage']
+		})),
+		...headers.map((field) => ({
+			...field,
+			usage: 'header' as const
+		}))
+	];
+}
+
+export function vmcpComponentId(component: VMCPComponent) {
+	return component.id || component.mcpServerCatalogEntryID || '';
+}
 
 /** Personal servers belong to a power user's workspace rather than the shared catalog. */
 export function isWorkspaceOwned(entry: MCPCatalogEntry | VMCP) {
@@ -87,101 +141,86 @@ export function parseSelectedFilterIds(selected: string) {
 		.filter(Boolean);
 }
 
-function componentServerIds(entry: VMCP) {
-	return entry.components
+function componentServerIds(vmcp: VMCP) {
+	return (vmcp.components ?? [])
 		.map((component) => component.mcpServerCatalogEntryID || component.id)
 		.filter((id): id is string => Boolean(id));
 }
 
-function componentServerCount(entry: VMCP) {
-	return entry.components.length;
+function componentServerCount(vmcp: VMCP) {
+	return vmcp.components?.length ?? 0;
 }
 
 function sortFilterOptions(options: VMcpFilterOption[]) {
 	return options.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }
 
-function matchesOwnerFilter(entry: VMCP, ownerString: string, owners: Map<string, OrgUser>) {
-	const query = ownerString.trim().toLowerCase();
-	if (!query) return false;
-	const hasMatch = (user: OrgUser) =>
-		user.username.toLowerCase().includes(query) ||
-		user.email.toLowerCase().includes(query) ||
-		Boolean(user.displayName?.toLowerCase().includes(query));
-	const owner = entry.userID && owners.get(entry.userID);
-	return Boolean(owner && hasMatch(owner));
-}
-
-function selectedVMcpFilterIds(filters: VMcpFilters) {
-	return {
-		nameIds: parseSelectedFilterIds(filters.names ?? ''),
-		ownerString: (filters.owners ?? '').trim(),
-		componentIds: parseSelectedFilterIds(filters.components ?? '')
-	};
-}
-
-/** True when no filters are selected, or when the entry matches any selected filter (OR). */
-export function matchesVMcpFilters(
-	entry: VMCP,
-	filters: VMcpFilters,
-	owners: Map<string, OrgUser>
-) {
-	const { nameIds, ownerString, componentIds } = selectedVMcpFilterIds(filters);
-	if (nameIds.length === 0 && !ownerString && componentIds.length === 0) return true;
+function matchesOwnerQuery(vmcp: VMCP, query: string, owners: Map<string, OrgUser>) {
+	const owner = vmcp.userID && owners.get(vmcp.userID);
+	if (!owner) return false;
 	return (
-		nameIds.includes(entry.id) ||
-		matchesOwnerFilter(entry, ownerString, owners) ||
-		componentIds.some((id) => componentServerIds(entry).includes(id))
+		owner.username.toLowerCase().includes(query) ||
+		owner.email.toLowerCase().includes(query) ||
+		Boolean(owner.displayName?.toLowerCase().includes(query))
 	);
 }
 
-export function filterVMcps(entries: VMCP[], filters: VMcpFilters, owners: Map<string, OrgUser>) {
-	const { nameIds, ownerString, componentIds } = selectedVMcpFilterIds(filters);
-	if (nameIds.length === 0 && !ownerString && componentIds.length === 0) return entries;
-	return entries.filter((entry) => matchesVMcpFilters(entry, filters, owners));
+function matchesVMcpQuery(vmcp: VMCP, query: string, owners: Map<string, OrgUser>) {
+	if (!query) return true;
+	return matchesQuery(vmcp, query) || matchesOwnerQuery(vmcp, query.toLowerCase(), owners);
+}
+
+export function matchesVMcpFilters(vmcp: VMCP, filters: VMcpFilters, owners: Map<string, OrgUser>) {
+	const query = (filters.query ?? '').trim();
+	const componentIds = parseSelectedFilterIds(filters.components ?? '');
+	if (!query && componentIds.length === 0) return true;
+	const matchesComponents =
+		componentIds.length === 0 || componentIds.some((id) => componentServerIds(vmcp).includes(id));
+	return matchesVMcpQuery(vmcp, query, owners) && matchesComponents;
+}
+
+export function filterVMcps(vmcps: VMCP[], filters: VMcpFilters, owners: Map<string, OrgUser>) {
+	const query = (filters.query ?? '').trim();
+	const componentIds = parseSelectedFilterIds(filters.components ?? '');
+	if (!query && componentIds.length === 0) return vmcps;
+	return vmcps.filter((vmcp) => matchesVMcpFilters(vmcp, filters, owners));
 }
 
 export function buildVMcpComponentFilterOptions(
-	entries: VMCP[],
+	vmcps: VMCP[],
 	componentName?: (id: string) => string | undefined
 ): VMcpFilterOption[] {
 	const options: VMcpFilterOption[] = [];
 	const seen = new Set<string>();
-	for (const entry of entries) {
-		for (const component of entry.components) {
+	for (const vmcp of vmcps) {
+		for (const component of vmcp.components ?? []) {
 			const id = component.mcpServerCatalogEntryID || component.id;
 			if (!id || seen.has(id)) continue;
 			seen.add(id);
 			options.push({
 				id,
-				label: componentName?.(id) || component.catalogEntry?.manifest?.name || component.name || id
+				label: componentName?.(id) || component.name || component.catalogEntry?.manifest?.name || id
 			});
 		}
 	}
 	return sortFilterOptions(options);
 }
 
-function compareVMcpNames(a: VMCP, b: VMCP) {
+function compareNames(a: VMCP, b: VMCP) {
 	return (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, {
 		sensitivity: 'base'
 	});
 }
 
-export function sortVMcps(entries: VMCP[], sortBy: VMcpSortBy) {
-	return [...entries].sort((a, b) => {
+export function sortVMcps(vmcps: VMCP[], sortBy: VMcpSortBy) {
+	return [...vmcps].sort((a, b) => {
 		if (sortBy === 'created') {
-			return (b.created ?? '').localeCompare(a.created ?? '') || compareVMcpNames(a, b);
+			return (b.created ?? '').localeCompare(a.created ?? '') || compareNames(a, b);
 		}
 		if (sortBy === 'componentServers') {
-			return componentServerCount(b) - componentServerCount(a) || compareVMcpNames(a, b);
+			return componentServerCount(b) - componentServerCount(a) || compareNames(a, b);
 		}
-		return compareVMcpNames(a, b);
-	});
-}
-
-function compareNames(a: MCPCatalogEntry, b: MCPCatalogEntry) {
-	return (a.manifest.name ?? '').localeCompare(b.manifest.name ?? '', undefined, {
-		sensitivity: 'base'
+		return compareNames(a, b);
 	});
 }
 
@@ -218,18 +257,24 @@ function popularityRank(entry: MCPCatalogEntry) {
 	return MCP_SERVER_POPULARITY_ORDER.length;
 }
 
+function compareCatalogNames(a: MCPCatalogEntry, b: MCPCatalogEntry) {
+	return (a.manifest.name ?? '').localeCompare(b.manifest.name ?? '', undefined, {
+		sensitivity: 'base'
+	});
+}
+
 export function sortMcpServers(entries: MCPCatalogEntry[], sortBy: McpServerSortBy) {
 	return [...entries].sort((a, b) => {
 		if (sortBy === 'created') {
-			return (b.created ?? '').localeCompare(a.created ?? '') || compareNames(a, b);
+			return (b.created ?? '').localeCompare(a.created ?? '') || compareCatalogNames(a, b);
 		}
 		if (sortBy === 'nameDesc') {
-			return compareNames(b, a);
+			return compareCatalogNames(b, a);
 		}
 		if (sortBy === 'popularity') {
-			return popularityRank(a) - popularityRank(b) || compareNames(a, b);
+			return popularityRank(a) - popularityRank(b) || compareCatalogNames(a, b);
 		}
-		return compareNames(a, b);
+		return compareCatalogNames(a, b);
 	});
 }
 
@@ -333,32 +378,20 @@ export function buildWirePath(from: Point, to: Point, phase = 0) {
 	return points.join(' ');
 }
 
-export function resolveVMcpComponents(
-	vmcp: VMCP,
-	_entries: MCPCatalogEntry[] = [],
-	_servers: MCPCatalogServer[] = []
-): VMcpComponentView[] {
-	return vmcp.components.map((component: VMCPComponent, index) => {
+export function resolveVMcpComponents(vmcp: VMCP): VMcpComponentView[] {
+	return (vmcp.components ?? []).map((component, index) => {
 		const manifest = component.catalogEntry?.manifest;
-		const reference = component.id || component.mcpServerCatalogEntryID;
+		const id = vmcpComponentId(component) || `component-${index}`;
 		return {
-			key: reference ?? `component-${index}`,
-			name: component.name || manifest?.name || reference || 'Unknown server',
+			key: id,
+			name: component.name || manifest?.name || id || 'Unknown server',
 			icon: manifest?.icon,
 			description: manifest?.shortDescription || manifest?.description,
-			id: reference,
+			id,
 			toolOverrides: component.toolOverrides,
 			toolPreview: manifest?.toolPreview
 		};
 	});
-}
-
-/** The normal client connection endpoint for a virtual MCP. */
-export function vmcpConnectURL(vmcp: VMCP) {
-	const link = vmcp.links?.connectURL || vmcp.links?.['mcp-connect'];
-	if (link) return link;
-	const origin = typeof window !== 'undefined' ? window.location.origin : '';
-	return `${origin}/mcp-connect/${encodeURIComponent(vmcp.id)}`;
 }
 
 function mcpConfigKey(name: string, id: string, used: Set<string>) {
@@ -375,6 +408,7 @@ function httpMcpServers(vmcps: VMCP[]) {
 	const servers: Record<string, { type: 'http'; url: string }> = {};
 	for (const vmcp of vmcps) {
 		const url = vmcpConnectURL(vmcp);
+		if ((vmcp.components ?? []).length === 0) continue;
 		if (!url) continue;
 		servers[mcpConfigKey(vmcp.displayName || vmcp.id, vmcp.id, used)] = {
 			type: 'http',
@@ -440,4 +474,34 @@ export function buildConnectAllSnippets(
 			value: JSON.stringify({ mcpServers: servers }, null, 2)
 		}
 	];
+}
+
+/** Servers without tool overrides only report a preview, so those totals are approximate. */
+export function getToolCounts(componentServers: VMcpComponentView[]) {
+	let enabled = 0;
+	let total = 0;
+	let approximate = false;
+	for (const component of componentServers) {
+		if (component.toolOverrides) {
+			enabled += component.toolOverrides.filter((tool) => tool.enabled === true).length;
+			total += component.toolOverrides.length;
+			continue;
+		}
+		approximate = true;
+		const previewCount = component.toolPreview?.length ?? 0;
+		enabled += previewCount;
+		total += previewCount;
+	}
+	return { enabled, total, approximate };
+}
+
+export function getProfilesDisplayText(profiles?: VMCPProfile[]) {
+	if (!profiles) return '';
+
+	const names = profiles.map((profile) => profile.name);
+	if (names.length <= 1) return names[0] ?? '';
+
+	const rest = names.slice(0, names.length > 5 ? 4 : -1);
+	const last = names.length > 5 ? `${names.length - 4} others` : names.at(-1);
+	return `${rest.join(', ')} and ${last}`;
 }

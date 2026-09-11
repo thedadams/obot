@@ -1,11 +1,15 @@
 <script lang="ts">
+	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import Confirm from '$lib/components/Confirm.svelte';
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
 	import CompositeEditTools from '$lib/components/mcp/composite/CompositeEditTools.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
 	import type { VMcpToolDialog, VMcpToolFlow } from '$lib/runes/vmcps/vmcpToolFlow.svelte';
+	import McpServerIcon from './McpServerIcon.svelte';
+	import VMcpComponentConfigurationDialog from './VMcpComponentConfigurationDialog.svelte';
 	import VMcpToolsSetup from './VMcpToolsSetup.svelte';
-	import { RefreshCcw, Server, Trash2 } from '@lucide/svelte';
+	import { ArrowRightLeft, RefreshCcw, Server, Settings2, Trash2 } from '@lucide/svelte';
+	import { tick } from 'svelte';
 
 	interface Props {
 		flow: VMcpToolFlow;
@@ -13,17 +17,35 @@
 
 	let { flow }: Props = $props();
 	let addedCreateDialog = $state<ReturnType<typeof ResponsiveDialog>>();
+	let asIsButton = $state<HTMLButtonElement>();
 	let setupDialog = $state<ReturnType<typeof VMcpToolsSetup>>();
 	let editDialog = $state<ReturnType<typeof CompositeEditTools>>();
 	let componentActionsDialog = $state<ReturnType<typeof ResponsiveDialog>>();
+	let configurationDialog = $state<ReturnType<typeof VMcpComponentConfigurationDialog>>();
 	let renderedDialog: VMcpToolDialog | undefined;
 	let synchronizing = false;
+	const toolsLockedByUserSupplied = $derived(
+		flow.configuringComponent?.configuration?.some((field) => field.policy === 'userAllowed') ??
+			false
+	);
+	const isLastComponent = $derived((flow.modifyingVMcp?.components ?? []).length <= 1);
+	const lastComponentTooltip = 'VMCP requires at least one component.';
 
 	function openDialog(dialog: VMcpToolDialog | undefined) {
-		if (dialog === 'added-create') addedCreateDialog?.open();
+		if (dialog === 'added-create') {
+			addedCreateDialog?.open();
+			void tick().then(() => asIsButton?.focus({ focusVisible: true }));
+		}
 		if (dialog === 'setup') setupDialog?.open();
 		if (dialog === 'edit') editDialog?.open();
 		if (dialog === 'actions') componentActionsDialog?.open();
+		if (dialog === 'configure' && flow.configuringEntry) {
+			configurationDialog?.open(flow.configuringEntry, {
+				configuration: flow.configuringComponent?.configuration,
+				submitLabel: flow.postCreateConfiguration ? 'Next' : 'Save',
+				errorMessage: 'Failed to update configuration.'
+			});
+		}
 	}
 
 	function closeDialog(dialog: VMcpToolDialog | undefined) {
@@ -31,10 +53,16 @@
 		if (dialog === 'setup') setupDialog?.close();
 		if (dialog === 'edit') editDialog?.close();
 		if (dialog === 'actions') componentActionsDialog?.close();
+		if (dialog === 'configure') configurationDialog?.close();
 	}
 
 	function handleDialogClose(dialog: VMcpToolDialog) {
-		if (!synchronizing && flow.dialog === dialog) flow.close();
+		if (synchronizing || flow.dialog !== dialog) return;
+		if (dialog === 'configure') {
+			flow.returnToActions();
+			return;
+		}
+		flow.close();
 	}
 
 	$effect(() => {
@@ -64,54 +92,59 @@
 	{/snippet}
 </Confirm>
 
-<Confirm
-	show={flow.dialog === 'added-confirm'}
-	onsuccess={flow.selectToolsForAdded}
-	oncancel={flow.close}
-	title="Add MCP Server"
-	type="info"
-	submitText="Select Which Tools To Enable"
-	cancelText="Add All Tools"
-	classes={{
-		actions: 'flex-col md:flex-col',
-		confirm: 'btn-secondary'
-	}}
->
-	{#snippet msgContent()}
-		{@render serverHeading()}
-	{/snippet}
-	{#snippet note()}
-		<b>{flow.addedServer?.component.catalogEntry.manifest.name ?? 'this server'}</b> has been added
-		to
-		<b>{flow.addedServer?.vmcp.displayName ?? 'this vMCP'}</b>. Would you like to add all tools or
-		select which tools to enable?
-	{/snippet}
-</Confirm>
-
 <ResponsiveDialog
 	animate="slide"
-	class="w-md"
+	class="md:w-lg"
 	bind:this={addedCreateDialog}
 	title="Add Tools"
 	onClose={() => handleDialogClose('added-create')}
 >
-	{#if flow.dialog === 'added-create'}
-		<div class="mb-4">
-			{@render serverHeading()}
-		</div>
-		<p class="mb-4 text-sm font-light">
-			<b>{flow.addedServer?.component.catalogEntry.manifest.name ?? 'this server'}</b> has been
-			added to
-			<b>{flow.addedServer?.vmcp.displayName ?? 'this vMCP'}</b>. Would you like to add all tools or
-			select which tools to enable?
-		</p>
-		<div class="flex flex-col gap-2">
-			<button class="btn btn-secondary btn-sm text-xs" onclick={flow.close}>Add All Tools</button>
-			<button class="btn btn-primary btn-sm text-xs" onclick={flow.selectToolsForAdded}>
-				Select Which Tools To Enable
-			</button>
-		</div>
-	{/if}
+	<div class="flex flex-col gap-4">
+		{#if flow.dialog === 'added-create'}
+			<div class="flex flex-col items-center gap-4">
+				{@render serverHeading()}
+				<p class="text-center text-sm font-light">
+					How would you like to set up the MCP server tools?
+				</p>
+			</div>
+			<div class="flex w-full flex-col gap-4">
+				<button
+					bind:this={asIsButton}
+					class="dark:bg-base-300 hover:bg-base-200 focus:bg-base-200 dark:hover:bg-base-400 dark:focus:bg-base-400 dark:border-base-400 border-base-300 group bg-base-100 flex cursor-pointer items-center gap-4 rounded-md border px-2 py-4 text-left transition-colors duration-300"
+					onclick={flow.close}
+				>
+					<ArrowRightLeft
+						class="text-muted-content size-12 shrink-0 pl-1 transition-colors group-hover:text-inherit group-focus:text-inherit"
+					/>
+					<div>
+						<p class="mb-1 text-sm font-semibold">As-is</p>
+						<span class="text-muted-content block text-xs leading-4">
+							Use the MCP server as-is. Tools and their definitions are passed through
+							automatically, including future changes from the source. No authentication is required
+							during setup.
+						</span>
+					</div>
+				</button>
+				<button
+					class="dark:bg-base-300 hover:bg-base-200 focus:bg-base-200 dark:hover:bg-base-400 dark:focus:bg-base-400 dark:border-base-400 border-base-300 group bg-base-100 flex cursor-pointer items-center gap-4 rounded-md border px-2 py-4 text-left transition-colors duration-300"
+					onclick={flow.selectToolsForAdded}
+				>
+					<Settings2
+						class="text-muted-content size-12 shrink-0 pl-1 transition-colors group-hover:text-inherit group-focus:text-inherit"
+					/>
+					<div>
+						<p class="mb-1 text-sm font-semibold">
+							Managed <span class="text-muted-content font-normal">[Recommended]</span>
+						</p>
+						<span class="text-muted-content block text-xs leading-4">
+							Authenticate to discover and select specific tools. Tool names and descriptions are
+							captured and can be customized, protecting the vMCP from unexpected upstream changes.
+						</span>
+					</div>
+				</button>
+			</div>
+		{/if}
+	</div>
 </ResponsiveDialog>
 
 <VMcpToolsSetup
@@ -124,15 +157,18 @@
 	otherEffectiveNames={flow.otherEffectiveNames}
 	otherToolPrefixes={flow.otherToolPrefixes}
 	onCancel={flow.close}
-	onSuccess={(config) =>
-		flow.saveTools({
-			...flow.configuringComponent!,
+	onSuccess={(config) => {
+		const component = flow.configuringComponent;
+		if (!component) return;
+		void flow.saveTools({
+			...component,
 			toolPrefix: config.toolPrefix,
 			toolOverrides: config.toolOverrides
-		})}
+		});
+	}}
 >
 	{#snippet additionalActions()}
-		{#if flow.modifyingExistingComponent}
+		{#if flow.modifyingExistingComponent && !flow.collecting}
 			{@render removeComponentButton()}
 		{/if}
 	{/snippet}
@@ -144,9 +180,9 @@
 	onClose={() => handleDialogClose('actions')}
 >
 	{#snippet titleContent()}
-		<div class="flex items-center gap-2 text-base font-semibold">
+		<div class="flex items-center gap-2 font-semibold">
 			{#if flow.configuringEntry?.manifest.icon}
-				<img src={flow.configuringEntry.manifest.icon} alt="" class="size-6 icon" />
+				<McpServerIcon icon={flow.configuringEntry.manifest.icon} />
 			{:else}
 				<div class="icon">
 					<Server class="size-6" />
@@ -155,16 +191,52 @@
 			{flow.configuringEntry?.manifest.name}
 		</div>
 	{/snippet}
-	<p class="mb-4 text-sm font-light">
-		All tools are enabled on
-		<b class="font-semibold">{flow.modifyingVMcp?.displayName ?? 'this vMCP'}</b> by default. What would
-		you like to do?
-	</p>
-	<div class="flex flex-col gap-2">
-		<button class="btn btn-primary" onclick={flow.modifyToolsFromActions}>Modify Tools</button>
-		<button class="btn btn-error" onclick={flow.promptRemove}>Delete MCP Server</button>
+	<div class="flex flex-col gap-2 md:px-0 px-4">
+		<p class="text-sm text-center mb-3 md:mt-0 mt-4">What would you like to do?</p>
+		<div
+			class="w-full"
+			use:tooltip={toolsLockedByUserSupplied
+				? {
+						text: "Tools can't be modified because this server has user-supplied configuration.",
+						disablePortal: true
+					}
+				: undefined}
+		>
+			<button
+				class="btn btn-secondary w-full"
+				disabled={toolsLockedByUserSupplied}
+				onclick={flow.modifyToolsFromActions}
+			>
+				Modify Tools
+			</button>
+		</div>
+		{#if flow.hasConfigurableFields}
+			<button class="btn btn-secondary w-full" onclick={flow.editConfiguration}>
+				Change Configuration
+			</button>
+		{/if}
+		<div
+			class="w-full"
+			use:tooltip={isLastComponent
+				? { text: lastComponentTooltip, disablePortal: true, placement: 'bottom' }
+				: undefined}
+		>
+			<button
+				class="btn btn-secondary hover:btn-error w-full"
+				disabled={isLastComponent}
+				onclick={flow.promptRemove}
+			>
+				Remove {flow.configuringEntry?.manifest.name ?? 'this server'}
+			</button>
+		</div>
 	</div>
 </ResponsiveDialog>
+
+<VMcpComponentConfigurationDialog
+	bind:this={configurationDialog}
+	onNext={flow.saveConfiguration}
+	onClose={() => handleDialogClose('configure')}
+/>
 
 <CompositeEditTools
 	bind:this={editDialog}
@@ -179,7 +251,6 @@
 >
 	{#snippet additionalActions()}
 		<div class="flex items-center gap-3">
-			{@render removeComponentButton()}
 			<IconButton
 				tooltip={{ text: 'Refresh tools', disablePortal: true, placement: 'right' }}
 				onclick={flow.refreshTools}
@@ -193,23 +264,34 @@
 
 {#snippet serverHeading()}
 	<span class="flex items-center gap-2 text-base font-semibold">
-		{#if flow.addedServer?.component.catalogEntry.manifest.icon}
-			<img src={flow.addedServer.component.catalogEntry.manifest.icon} alt="" class="size-6 icon" />
+		{#if flow.addedServer?.component.manifest.icon}
+			<img src={flow.addedServer.component.manifest.icon} alt="" class="size-6 icon" />
 		{:else}
 			<div class="icon">
 				<Server class="size-6" />
 			</div>
 		{/if}
-		{flow.addedServer?.component.catalogEntry.manifest.name}
+		{flow.addedServer?.component.manifest.name}
 	</span>
 {/snippet}
 
 {#snippet removeComponentButton()}
-	<IconButton
-		tooltip={{ text: 'Delete MCP Server', disablePortal: true, placement: 'right' }}
-		onclick={flow.promptRemove}
-		variant="danger2"
+	<div
+		use:tooltip={isLastComponent
+			? { text: lastComponentTooltip, disablePortal: true, placement: 'right' }
+			: undefined}
 	>
-		<Trash2 class="size-4" />
-	</IconButton>
+		<IconButton
+			tooltip={{
+				text: isLastComponent ? lastComponentTooltip : 'Delete MCP Server',
+				disablePortal: true,
+				placement: 'right'
+			}}
+			onclick={flow.promptRemove}
+			variant="danger2"
+			disabled={isLastComponent}
+		>
+			<Trash2 class="size-4" />
+		</IconButton>
+	</div>
 {/snippet}

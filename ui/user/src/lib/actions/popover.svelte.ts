@@ -195,7 +195,10 @@ export default function popover(initialOptions?: PopoverOptions): Popover {
 
 		const onRefBlur = (e: FocusEvent) => {
 			if (interactive && relatedInside(e.relatedTarget)) return;
-			onRefLeave();
+			queueMicrotask(() => {
+				if (document.activeElement === ref) return;
+				onRefLeave();
+			});
 		};
 
 		const onTooltipFocusOut = (e: FocusEvent) => {
