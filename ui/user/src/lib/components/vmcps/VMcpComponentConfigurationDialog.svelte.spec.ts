@@ -74,6 +74,29 @@ describe('VMcpComponentConfigurationDialog.svelte', () => {
 		expect(onNext).not.toHaveBeenCalled();
 	});
 
+	it('hides configuration with static values', async () => {
+		await preparePageData();
+		const onNext = vi.fn();
+		const result = await render(VMcpComponentConfigurationDialog, { onNext });
+		result.component.open(
+			configurableEntry({
+				config: [
+					field({ key: 'SECRET', name: 'Secret', sensitive: true, value: '******' }),
+					field({ key: 'REGION', name: 'Region', value: 'us-east-1' })
+				]
+			})
+		);
+
+		await expect
+			.element(page.getByRole('combobox', { name: 'Secret policy' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(page.getByRole('combobox', { name: 'Region policy' }))
+			.not.toBeInTheDocument();
+		await page.getByRole('button', { name: 'Next' }).click();
+		expect(onNext).toHaveBeenCalledWith([], false);
+	});
+
 	it('shows a value field when Fixed is selected and submits policies on Next', async () => {
 		await preparePageData();
 		const onNext = vi.fn();

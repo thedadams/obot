@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/obot-platform/obot/apiclient/types"
 	"github.com/obot-platform/obot/pkg/accesscontrolrule"
@@ -253,21 +254,28 @@ func (h *VMCPHandler) loadComponentSnapshots(req api.Context, manifest *types.VM
 			if component.Name == "" {
 				component.Name = previous.Name
 			}
-			continue
-		}
-		component.MCPCatalogID = entry.Spec.MCPCatalogName
-		component.CatalogEntry = types.MCPServerCatalogEntrySnapshot{
-			Manifest:         entry.Spec.Manifest,
-			UnsupportedTools: entry.Spec.UnsupportedTools,
-		}
-		component.SourceDigest = utils.Digest(component.CatalogEntry)
-		component.OAuthCredentialID = vmcpconfig.StaticOAuthCredentialReference(entry.Spec.Manifest, entry.Name)
-		if component.Name == "" {
-			component.Name = entry.Spec.Manifest.Name
+		} else {
+			component.MCPCatalogID = entry.Spec.MCPCatalogName
+			component.CatalogEntry = types.MCPServerCatalogEntrySnapshot{
+				Manifest:         entry.Spec.Manifest,
+				UnsupportedTools: entry.Spec.UnsupportedTools,
+			}
+			component.SourceDigest = utils.Digest(component.CatalogEntry)
+			component.OAuthCredentialID = vmcpconfig.StaticOAuthCredentialReference(entry.Spec.Manifest, entry.Name)
 			if component.Name == "" {
-				component.Name = entry.Name
+				component.Name = entry.Spec.Manifest.Name
+				if component.Name == "" {
+					component.Name = entry.Name
+				}
 			}
 		}
+		static := map[string]bool{}
+		for _, field := range component.CatalogEntry.Manifest.Config {
+			static[field.Key] = field.Value != ""
+		}
+		component.Configuration = slices.DeleteFunc(component.Configuration, func(policy types.VMCPConfigurationPolicy) bool {
+			return static[policy.Key]
+		})
 	}
 	return nil
 }
@@ -301,6 +309,28 @@ func vmcpConfiguration(components []types.VMCPComponent, secrets map[string]stri
 }
 
 func convertVMCP(vmcp v1.VMCP) types.VMCP {
+	manifest := vmcp.Spec.Manifest
+	manifest.Components = slices.Clone(manifest.Components)
+	for i := range manifest.Components {
+		component := &manifest.Components[i]
+		component.CatalogEntry.Manifest.Config = slices.Clone(component.CatalogEntry.Manifest.Config)
+		sensitive := map[string]bool{}
+		for i := range component.CatalogEntry.Manifest.Config {
+			field := &component.CatalogEntry.Manifest.Config[i]
+			sensitive[field.Key] = field.Sensitive
+			if field.Sensitive && field.Value != "" {
+				field.Value = "******"
+			}
+		}
+		component.Configuration = slices.Clone(component.Configuration)
+		for i := range component.Configuration {
+			policy := &component.Configuration[i]
+			if sensitive[policy.Key] && policy.Value != "" {
+				policy.Value = "******"
+			}
+		}
+	}
+
 	componentStatuses := make([]types.VMCPComponentStatus, 0, len(vmcp.Status.Components))
 	for _, status := range vmcp.Status.Components {
 		componentStatuses = append(componentStatuses, types.VMCPComponentStatus{
@@ -314,7 +344,7 @@ func convertVMCP(vmcp v1.VMCP) types.VMCP {
 	return types.VMCP{
 		LegacySlug:              vmcp.Spec.LegacySlug,
 		Metadata:                MetadataFrom(&vmcp),
-		VMCPManifest:            vmcp.Spec.Manifest,
+		VMCPManifest:            manifest,
 		UserID:                  vmcp.Spec.UserID,
 		StaticConfigurationHash: vmcp.Spec.StaticConfigurationHash,
 		Status: types.VMCPStatus{

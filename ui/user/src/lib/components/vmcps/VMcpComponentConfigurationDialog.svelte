@@ -84,6 +84,7 @@
 		entry = target;
 		const existing = new Map((options?.configuration ?? []).map((policy) => [policy.key, policy]));
 		drafts = catalogConfigurationFields(target)
+			.filter((field) => !field.value)
 			.toSorted((a, b) => Number(Boolean(b.required)) - Number(Boolean(a.required)))
 			.map((field) => {
 				const policy = existing.get(field.key);

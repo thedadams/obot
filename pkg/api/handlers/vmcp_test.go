@@ -358,6 +358,33 @@ func TestVMCPHandlerCreateStoresStaticConfigurationInCredential(t *testing.T) {
 	}
 }
 
+func TestConvertVMCPRedactsSensitiveConfigurationValues(t *testing.T) {
+	vmcp := v1.VMCP{Spec: v1.VMCPSpec{Manifest: types.VMCPManifest{Components: []types.VMCPComponent{{
+		Configuration: []types.VMCPConfigurationPolicy{
+			{Key: "SECRET", Value: "policy-secret"},
+			{Key: "REGION", Value: "policy-value"},
+		},
+		CatalogEntry: types.MCPServerCatalogEntrySnapshot{Manifest: types.MCPServerCatalogEntryManifest{
+			Config: []types.MCPConfig{
+				{Key: "SECRET", Sensitive: true, Value: "catalog-secret"},
+				{Key: "REGION", Value: "catalog-value"},
+			},
+		}},
+	}}}}}
+
+	converted := convertVMCP(vmcp)
+	if converted.Components[0].Configuration[0].Value != "******" ||
+		converted.Components[0].Configuration[1].Value != "policy-value" ||
+		converted.Components[0].CatalogEntry.Manifest.Config[0].Value != "******" ||
+		converted.Components[0].CatalogEntry.Manifest.Config[1].Value != "catalog-value" {
+		t.Fatal("configuration values were not filtered correctly")
+	}
+	if vmcp.Spec.Manifest.Components[0].Configuration[0].Value != "policy-secret" ||
+		vmcp.Spec.Manifest.Components[0].CatalogEntry.Manifest.Config[0].Value != "catalog-secret" {
+		t.Fatal("source VMCP was mutated")
+	}
+}
+
 func TestVMCPHandlerUpdatePreservesStaticConfiguration(t *testing.T) {
 	storage := newVMCPTestStorage(vmcpCatalogEntryForTest("entry"))
 	gatewayClient := newHandlerTestGateway(t)
@@ -905,6 +932,7 @@ func vmcpHandlerForTest(t *testing.T, storage kclient.Client) *VMCPHandler {
 func TestVMCPComponentSnapshots(t *testing.T) {
 	entry := vmcpCatalogEntryForTest("entry")
 	entry.Spec.Manifest.RemoteConfig = &types.RemoteCatalogConfig{StaticOAuthRequired: true, FixedURL: "https://example.com/mcp"}
+	entry.Spec.Manifest.Config = []types.MCPConfig{{Key: "STATIC", Value: "catalog-value", Usage: types.Env}}
 	storage := newVMCPTestStorage(entry)
 	handler := vmcpHandlerForTest(t, storage)
 	gatewayClient := newHandlerTestGateway(t)
@@ -914,8 +942,12 @@ func TestVMCPComponentSnapshots(t *testing.T) {
 	manifest.Components[0].CatalogEntry.Manifest.Name = "forged-snapshot"
 	manifest.Components[0].SourceDigest = "forged-digest"
 	manifest.Components[0].OAuthCredentialID = "forged-credential"
+	manifest.Components[0].Configuration = []types.VMCPConfigurationPolicy{{Key: "STATIC", Policy: types.VMCPConfigurationPolicyFixed, Value: "override"}}
 	created := callVMCPCreate(t, storage, gatewayClient, handler, manifest, u)
 	component := created.Components[0]
+	if len(component.Configuration) != 0 || component.CatalogEntry.Manifest.Config[0].Value != "catalog-value" {
+		t.Fatalf("catalog static configuration was overridden: %#v", component)
+	}
 	if component.OAuthCredentialID != system.MCPOAuthCredentialName(entry.Name) {
 		t.Fatalf("incorrect OAuth reference: %q", component.OAuthCredentialID)
 	}
@@ -930,7 +962,10 @@ func TestVMCPComponentSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An update needs only the entry ID and the stable component identity, not a snapshot or catalog ID.
-	manifest.Components[0] = types.VMCPComponent{ID: component.ID, MCPServerCatalogEntryID: entry.Name}
+	manifest.Components[0] = types.VMCPComponent{
+		ID: component.ID, MCPServerCatalogEntryID: entry.Name,
+		Configuration: []types.VMCPConfigurationPolicy{{Key: "STATIC", Policy: types.VMCPConfigurationPolicyUserAllowed}},
+	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -951,6 +986,9 @@ func TestVMCPComponentSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated := stored.Spec.Manifest.Components[0]
+	if len(updated.Configuration) != 0 || updated.CatalogEntry.Manifest.Config[0].Value != "catalog-value" {
+		t.Fatalf("catalog static configuration was overridden during update: %#v", updated)
+	}
 	if updated.SourceDigest != component.SourceDigest || updated.CatalogEntry.Manifest.Name != component.CatalogEntry.Manifest.Name || updated.OAuthCredentialID != component.OAuthCredentialID {
 		t.Fatalf("ordinary update refreshed the snapshot: %#v", updated)
 	}
