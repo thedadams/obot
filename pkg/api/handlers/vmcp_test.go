@@ -932,7 +932,10 @@ func vmcpHandlerForTest(t *testing.T, storage kclient.Client) *VMCPHandler {
 func TestVMCPComponentSnapshots(t *testing.T) {
 	entry := vmcpCatalogEntryForTest("entry")
 	entry.Spec.Manifest.RemoteConfig = &types.RemoteCatalogConfig{StaticOAuthRequired: true, FixedURL: "https://example.com/mcp"}
-	entry.Spec.Manifest.Config = []types.MCPConfig{{Key: "STATIC", Value: "catalog-value", Usage: types.Env}}
+	entry.Spec.Manifest.Config = []types.MCPConfig{
+		{Key: "STATIC", Value: "catalog-value", Usage: types.Env},
+		{Key: "BOUND", SecretBinding: &types.MCPSecretBinding{Name: "config", Key: "token"}, Usage: types.Env},
+	}
 	storage := newVMCPTestStorage(entry)
 	handler := vmcpHandlerForTest(t, storage)
 	gatewayClient := newHandlerTestGateway(t)
@@ -942,7 +945,10 @@ func TestVMCPComponentSnapshots(t *testing.T) {
 	manifest.Components[0].CatalogEntry.Manifest.Name = "forged-snapshot"
 	manifest.Components[0].SourceDigest = "forged-digest"
 	manifest.Components[0].OAuthCredentialID = "forged-credential"
-	manifest.Components[0].Configuration = []types.VMCPConfigurationPolicy{{Key: "STATIC", Policy: types.VMCPConfigurationPolicyFixed, Value: "override"}}
+	manifest.Components[0].Configuration = []types.VMCPConfigurationPolicy{
+		{Key: "STATIC", Policy: types.VMCPConfigurationPolicyFixed, Value: "override"},
+		{Key: "BOUND", Policy: types.VMCPConfigurationPolicyUserAllowed},
+	}
 	created := callVMCPCreate(t, storage, gatewayClient, handler, manifest, u)
 	component := created.Components[0]
 	if len(component.Configuration) != 0 || component.CatalogEntry.Manifest.Config[0].Value != "catalog-value" {
@@ -964,7 +970,10 @@ func TestVMCPComponentSnapshots(t *testing.T) {
 	// An update needs only the entry ID and the stable component identity, not a snapshot or catalog ID.
 	manifest.Components[0] = types.VMCPComponent{
 		ID: component.ID, MCPServerCatalogEntryID: entry.Name,
-		Configuration: []types.VMCPConfigurationPolicy{{Key: "STATIC", Policy: types.VMCPConfigurationPolicyUserAllowed}},
+		Configuration: []types.VMCPConfigurationPolicy{
+			{Key: "STATIC", Policy: types.VMCPConfigurationPolicyUserAllowed},
+			{Key: "BOUND", Policy: types.VMCPConfigurationPolicyFixed, Value: "override"},
+		},
 	}
 	body, err := json.Marshal(manifest)
 	if err != nil {

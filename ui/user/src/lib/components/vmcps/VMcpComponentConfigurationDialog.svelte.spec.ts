@@ -82,7 +82,12 @@ describe('VMcpComponentConfigurationDialog.svelte', () => {
 			configurableEntry({
 				config: [
 					field({ key: 'SECRET', name: 'Secret', sensitive: true, value: '******' }),
-					field({ key: 'REGION', name: 'Region', value: 'us-east-1' })
+					field({ key: 'REGION', name: 'Region', value: 'us-east-1' }),
+					field({
+						key: 'BOUND',
+						name: 'Bound',
+						secretBinding: { name: 'config', key: 'token' }
+					})
 				]
 			})
 		);
@@ -92,6 +97,9 @@ describe('VMcpComponentConfigurationDialog.svelte', () => {
 			.not.toBeInTheDocument();
 		await expect
 			.element(page.getByRole('combobox', { name: 'Region policy' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(page.getByRole('combobox', { name: 'Bound policy' }))
 			.not.toBeInTheDocument();
 		await page.getByRole('button', { name: 'Next' }).click();
 		expect(onNext).toHaveBeenCalledWith([], false);
