@@ -350,8 +350,6 @@ export const PII_FILTER_OPTION_VALUES = [
 ];
 
 export const OBOT_GUIDE_KEYS = {
-	COMPLETED: '@obot/completed-guide',
-	GUIDE: '@obot/seen-guide',
 	SHOW_ALL_GUIDES: '@obot/show-all-guides'
 } as const;
 
@@ -420,9 +418,10 @@ export const MCP_ACCESS_POLICY_FIELD_IDS = {
 } as const;
 
 export const MDM_DEVICES_CONFIGURATION_FIELD_IDS = {
-	devicesLink: 'sidebar-link-devices',
-	enforcementDecisionsLink: 'sidebar-link-enforcement-decisions',
-	configurationTab: 'devices-tab-configuration',
+	devicesLink: 'sidebar-link-inventory',
+	enforcementEventsLink: 'sidebar-link-enforcement-events',
+	configurationTab: 'tab-configuration',
+	inventoryTabDeviceMcpServers: 'tab-device-mcp-servers',
 	configurationDetails: 'devices-configuration-details',
 	getStartedButton: 'devices-configuration-get-started',
 	newEnrollmentKeyButton: 'enrollment-new-key-btn',
@@ -436,8 +435,8 @@ export const MDM_DEVICES_CONFIGURATION_FIELD_IDS = {
 	installInstructionsStep: 'devices-install-instructions',
 	agentSettingsButton: 'devices-agent-settings',
 	checkForUpdatesButton: 'devices-check-for-updates-button',
-	devicesTabOverview: 'devices-tab-overview',
-	devicesTabDevices: 'devices-tab-devices',
+	devicesTabOverview: 'tab-overview',
+	devicesTabDevices: 'tab-devices',
 	toolCallEnforcementSection: 'tool-call-enforcement-section'
 };
 
