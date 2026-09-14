@@ -441,21 +441,30 @@ func (sm *SessionManager) catalogNameForServer(ctx context.Context, server v1.MC
 	if catalogName == "" {
 		catalogName = server.Spec.PowerUserWorkspaceID
 	}
-	if server.Spec.MCPServerCatalogEntryName != "" {
-		var entry v1.MCPServerCatalogEntry
-		if err := sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: server.Spec.MCPServerCatalogEntryName}, &entry); err == nil {
-			if catalogName == "" {
-				catalogName = entry.Spec.MCPCatalogName
-			}
-			if catalogName == "" {
-				catalogName = entry.Spec.PowerUserWorkspaceID
-			}
-		} else if !failOnEntryMissing && apierrors.IsNotFound(err) && server.Spec.CompositeName != "" {
-			if catalogName == "" {
-				catalogName = system.DefaultCatalog
-			}
-		} else {
-			return "", fmt.Errorf("failed to get MCP server catalog entry: %w", err)
+	if server.Spec.MCPServerCatalogEntryName == "" {
+		return catalogName, nil
+	}
+
+	// Composite and vMCP component servers run from the snapshot their parent holds and
+	// are deliberately not garbage collected with their catalog entry, so a deleted entry
+	// must not stop them from resolving. Every other server is collected along with its
+	// entry, so it keeps failing rather than serving a server that is on its way out.
+	entryMayBeMissing := server.Spec.VMCPComponentID != "" || (!failOnEntryMissing && server.Spec.CompositeName != "")
+	if entryMayBeMissing && catalogName != "" {
+		return catalogName, nil
+	}
+
+	var entry v1.MCPServerCatalogEntry
+	if err := sm.storageClient.Get(ctx, kclient.ObjectKey{Namespace: system.DefaultNamespace, Name: server.Spec.MCPServerCatalogEntryName}, &entry); err != nil {
+		if apierrors.IsNotFound(err) && entryMayBeMissing {
+			return system.DefaultCatalog, nil
+		}
+		return "", fmt.Errorf("failed to get MCP server catalog entry: %w", err)
+	}
+
+	if catalogName == "" {
+		if catalogName = entry.Spec.MCPCatalogName; catalogName == "" {
+			catalogName = entry.Spec.PowerUserWorkspaceID
 		}
 	}
 	return catalogName, nil
