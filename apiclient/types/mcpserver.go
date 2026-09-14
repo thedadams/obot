@@ -462,6 +462,13 @@ type MCPServer struct {
 
 	// CompositeName is the name of the composite server that this MCP server is a component of, if there is one.
 	CompositeName string `json:"compositeName,omitempty"`
+
+	// VMCPID owns a shared component server, mutually exclusive with VMCPInstanceID.
+	VMCPID string `json:"vmcpID,omitempty"`
+	// VMCPInstanceID owns a single-user component server, mutually exclusive with VMCPID.
+	VMCPInstanceID string `json:"vmcpInstanceID,omitempty"`
+	// VMCPComponentID identifies the VMCP component whose cached catalog entry was used to create this server.
+	VMCPComponentID string `json:"vmcpComponentID,omitempty"`
 }
 
 type OAuthMetadata struct {

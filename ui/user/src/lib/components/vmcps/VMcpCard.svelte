@@ -1,10 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import type { VMcpConnectOptions } from '$lib/services/vmcps/types';
-	import type { getToolCounts } from '$lib/services/vmcps/utils';
 	import { profile } from '$lib/stores';
 	import DotDotDot from '../DotDotDot.svelte';
-	import InfoTooltip from '../InfoTooltip.svelte';
 	import VMcpCardActions from './VMcpCardActions.svelte';
 	import { ExternalLink, Trash2 } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
@@ -20,14 +18,14 @@
 		connected?: boolean;
 		onSelect?: () => void;
 		onConnect?: (options?: VMcpConnectOptions) => void;
+		hideTest?: boolean;
 		onDelete?: () => void;
 		icon: Snippet;
 		children?: Snippet;
 		class?: string;
 		selectAriaLabel: string;
 		enterDelay?: number;
-		isOwner?: boolean;
-		tools?: ReturnType<typeof getToolCounts>;
+		userID?: string;
 		note?: string;
 	}
 
@@ -40,21 +38,20 @@
 		connected,
 		onSelect,
 		onConnect,
+		hideTest,
 		onDelete,
 		icon,
 		children,
 		class: clazz,
 		selectAriaLabel,
 		enterDelay,
-		isOwner,
-		tools,
-		note
+		note,
+		userID
 	}: Props = $props();
 
-	const roughEstimationText =
-		'This is a rough approximation of the number of tools available. The exact number may vary.';
-
-	let hasFooterContent = $derived(note || tools);
+	let isCreator = $derived(Boolean(userID && profile.current.id === userID));
+	let canDelete = $derived(Boolean(profile.current.isAdmin?.() || isCreator));
+	let canConnect = $derived(!userID || isCreator);
 </script>
 
 <div
@@ -117,7 +114,7 @@
 				>
 					View Usage <ExternalLink class="size-4" />
 				</a>
-				{#if profile.current.isAdmin?.() || isOwner}
+				{#if canDelete}
 					<button
 						class="menu-button-destructive"
 						onclick={(e) => {
@@ -139,30 +136,21 @@
 	{/if}
 
 	<div class="pointer-events-auto relative z-10">
-		<VMcpCardActions {id} {connectURL} {connectButtonId} {onConnect} />
+		<VMcpCardActions
+			{id}
+			{connectURL}
+			{connectButtonId}
+			{onConnect}
+			{hideTest}
+			disabled={!canConnect}
+		/>
 	</div>
 
-	{#if hasFooterContent}
+	{#if note}
 		<div class="pt-2 border-t border-base-200 dark:border-base-400 flex justify-between gap-4">
 			<p class="text-muted-content text-xs font-light min-h-4">
 				{note}
 			</p>
-			{#if tools}
-				<p class="text-muted-content text-xs font-light items-center flex gap-1">
-					{#if tools.total === 0}
-						All tools enabled
-					{:else}
-						{tools.approximate ? '~' : ''}{tools.enabled} tools enabled
-						{#if tools.approximate}
-							<InfoTooltip
-								class="pointer-events-auto relative z-10"
-								text={roughEstimationText}
-								placement="bottom-end"
-							/>
-						{/if}
-					{/if}
-				</p>
-			{/if}
 		</div>
 	{/if}
 </div>

@@ -534,6 +534,9 @@ export interface MCPCatalogServer {
 	deploymentStatus?: string;
 	// Retained while legacy composite child deployments can still be migrated.
 	compositeName?: string;
+	vmcpID?: string;
+	vmcpComponentID?: string;
+	vmcpInstanceID?: string;
 	template?: boolean;
 	canConnect?: boolean;
 }

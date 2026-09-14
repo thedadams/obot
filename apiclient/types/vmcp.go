@@ -207,7 +207,7 @@ type VMCPInstanceStatus struct {
 type VMCPInstanceList List[VMCPInstance]
 
 // Default fills secure defaults that are omitted by clients.
-func (m *VMCPManifest) Default(personalServer bool) {
+func (m *VMCPManifest) Default(personalServer bool, userID string) {
 	m.DefaultConfigurationPolicies()
 
 	if personalServer {
@@ -215,7 +215,7 @@ func (m *VMCPManifest) Default(personalServer bool) {
 	} else if m.Profiles == nil {
 		m.Profiles = []VMCPProfile{{
 			Name:          "default",
-			Subjects:      []Subject{{Type: SubjectTypeSelector, ID: "*"}},
+			Subjects:      []Subject{{Type: SubjectTypeUser, ID: userID}},
 			AllowAllTools: true,
 		}}
 	}

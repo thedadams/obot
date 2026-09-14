@@ -12,9 +12,11 @@
 		connectButtonId?: string;
 		onConnect?: (options?: VMcpConnectOptions) => void;
 		id: string;
+		disabled?: boolean;
+		hideTest?: boolean;
 	}
 
-	let { connectURL, connectButtonId, onConnect, id }: Props = $props();
+	let { connectURL, connectButtonId, onConnect, id, disabled, hideTest = false }: Props = $props();
 
 	let hasLicenseEntitlementViolations = $derived(
 		(version.current.licenseEntitlementViolations || []).length > 0
@@ -29,7 +31,7 @@
 	);
 
 	function goToTester() {
-		goto(`/mcp-servers/test/${id}`);
+		goto(`/vmcps/${id}?view=tester`);
 	}
 
 	function handleTest() {
@@ -44,7 +46,11 @@
 <div class="flex items-center gap-2">
 	<div
 		use:tooltip={{
-			text: hasLicenseEntitlementViolations ? MCP_CONNECTION_INVALID_LICENSE_MESSAGE : undefined
+			text: hasLicenseEntitlementViolations
+				? MCP_CONNECTION_INVALID_LICENSE_MESSAGE
+				: disabled
+					? 'Cannot connect or test a personal vMCP'
+					: undefined
 		}}
 		class="flex grow"
 		id={connectButtonId}
@@ -53,9 +59,10 @@
 			class="relative z-10 flex grow items-center rounded-lg border border-base-300 dark:border-base-400"
 		>
 			<button
-				class="btn flex grow rounded-r-none border-transparent bg-primary/10 font-mono text-xs uppercase hover:bg-primary hover:text-primary-content"
+				class="btn flex grow rounded-r-none border-transparent bg-primary/10 font-mono text-xs uppercase not-disabled:hover:bg-primary not-disabled:hover:text-primary-content"
 				onclick={() => onConnect?.()}
-				disabled={hasLicenseEntitlementViolations}
+				disabled={hasLicenseEntitlementViolations || disabled}
+				aria-disabled={hasLicenseEntitlementViolations || disabled}
 			>
 				Connect
 			</button>
@@ -65,19 +72,22 @@
 				noButtonText
 				classes={{
 					button:
-						'size-10 justify-center rounded-r-md border-l border-l-base-300 p-2 hover:bg-primary hover:text-primary-content dark:border-l-base-400'
+						'size-10 justify-center rounded-r-md border-l border-l-base-300 p-2 not-disabled:hover:bg-primary not-disabled:hover:text-primary-content dark:border-l-base-400 disabled:text-muted-content disabled:opacity-50'
 				}}
+				disabled={hasLicenseEntitlementViolations || disabled}
 			/>
 		</div>
 	</div>
-	<button
-		type="button"
-		aria-label="Test vMCP"
-		use:tooltip={{ text: 'Test vMCP' }}
-		class="relative z-10 btn btn-square border-base-300 bg-transparent hover:bg-primary hover:text-primary-content dark:border-base-400"
-		onclick={handleTest}
-		disabled={hasLicenseEntitlementViolations}
-	>
-		<MessageCircle class="size-4" />
-	</button>
+	{#if !hideTest}
+		<button
+			type="button"
+			aria-label="Test vMCP"
+			use:tooltip={{ text: 'Test vMCP' }}
+			class="relative z-10 btn btn-square border-base-300 bg-transparent hover:bg-primary hover:text-primary-content dark:border-base-400"
+			onclick={handleTest}
+			disabled={hasLicenseEntitlementViolations || disabled}
+		>
+			<MessageCircle class="size-4" />
+		</button>
+	{/if}
 </div>

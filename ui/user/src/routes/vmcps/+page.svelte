@@ -5,6 +5,7 @@
 	import ConnectAllVMcps from '$lib/components/vmcps/ConnectAllVMcps.svelte';
 	import ConnectVMcp from '$lib/components/vmcps/ConnectVMcp.svelte';
 	import CreateEditVMcp from '$lib/components/vmcps/CreateEditVMcp.svelte';
+	import VMcpDeploymentsView from '$lib/components/vmcps/VMcpDeploymentsView.svelte';
 	import VMcpDesigner from '$lib/components/vmcps/VMcpDesigner.svelte';
 	import VMcpList from '$lib/components/vmcps/VMcpList.svelte';
 	import VMcpListSettings from '$lib/components/vmcps/VMcpListSettings.svelte';
@@ -18,32 +19,32 @@
 		sortVMcps,
 		resolveVMcpComponents
 	} from '$lib/services/vmcps/utils';
-	import { profile, vmcpInstances } from '$lib/stores';
+	import { profile, responsive, vmcpInstances } from '$lib/stores';
 	import { goto } from '$lib/url';
 	import { Layers, Plus } from '@lucide/svelte';
 	import { onMount, untrack } from 'svelte';
 
 	let { data } = $props();
-	let hasAdminAccess = $derived(profile.current.hasAdminAccess?.());
-	let views = $derived.by((): TabView[] => [
-		{ label: 'vMCPs', value: 'vmcps', content: vmcpsView }
-	]);
+	let views = $derived.by((): TabView[] =>
+		profile.current.hasAdminAccess?.()
+			? [
+					{ label: 'vMCPs', value: 'vmcps', content: vmcpsView },
+					{ label: 'Deployments', value: 'deployments', content: deploymentsView }
+				]
+			: [{ label: 'vMCPs', value: 'vmcps', content: vmcpsView }]
+	);
 
 	const options = COMMON_AI_CLIENTS.slice(0, 4);
 
 	let listedVMcps = $state<VMCP[]>(untrack(() => data?.vmcps ?? []));
 	let isLoading = $state(false);
 	let showMyVMcpsOnly = $state(false);
-	let showSharedVMcpsOnly = $state(false);
 	let sortBy = $state<VMcpSortBy>('name');
 	let query = $state('');
 	let componentFilterBy = $state('');
 	let vmcps = $derived.by(() => {
 		if (showMyVMcpsOnly) {
 			return listedVMcps.filter((vmcp) => vmcp.userID === profile.current.id);
-		}
-		if (hasAdminAccess && showSharedVMcpsOnly) {
-			return listedVMcps.filter((vmcp) => !vmcp.userID);
 		}
 		return listedVMcps;
 	});
@@ -122,7 +123,7 @@
 </script>
 
 {#if creating}
-	<VMcpDesigner onBack={hideCreate} />
+	<VMcpDesigner onBack={hideCreate} {usersMap} />
 {:else}
 	<TabLayout
 		title="vMCPs"
@@ -137,23 +138,25 @@
 {/if}
 
 {#snippet navActions(_view: string)}
-	<div class="flex items-center gap-2 md:mr-4">
-		<p class="text-xs font-light">Connect all vMCPs:</p>
-		{#each options as option (option.id)}
-			<IconButton
-				class="btn-sm bg-base-200 hover:bg-base-400 dark:hover:bg-base-300"
-				tooltip={{ text: option.alt, placement: 'bottom' }}
-				onclick={() => openConnectAllDialog(option)}
-			>
-				<img src={option.icon} alt={option.alt} class="size-4 block dark:hidden" />
-				<img
-					src={option.iconDark ?? option.icon}
-					alt={option.alt}
-					class="size-4 hidden dark:block"
-				/>
-			</IconButton>
-		{/each}
-	</div>
+	{#if !responsive.isMobile}
+		<div class="flex items-center gap-2 md:mr-4">
+			<p class="text-xs font-light">Connect all vMCPs:</p>
+			{#each options as option (option.id)}
+				<IconButton
+					class="btn-sm bg-base-200 hover:bg-base-400 dark:hover:bg-base-300"
+					tooltip={{ text: option.alt, placement: 'bottom' }}
+					onclick={() => openConnectAllDialog(option)}
+				>
+					<img src={option.icon} alt={option.alt} class="size-4 block dark:hidden" />
+					<img
+						src={option.iconDark ?? option.icon}
+						alt={option.alt}
+						class="size-4 hidden dark:block"
+					/>
+				</IconButton>
+			{/each}
+		</div>
+	{/if}
 	<button class="btn btn-primary" onclick={openCreate}>
 		<Plus class="size-4" /> Create vMCP
 	</button>
@@ -165,7 +168,6 @@
 	{:else}
 		<VMcpListSettings
 			bind:showMyVMcpsOnly
-			bind:showSharedVMcpsOnly
 			bind:sortBy
 			bind:query
 			bind:componentFilterBy
@@ -201,6 +203,10 @@
 			{/snippet}
 		</VMcpList>
 	{/if}
+{/snippet}
+
+{#snippet deploymentsView()}
+	<VMcpDeploymentsView vmcps={listedVMcps} {usersMap} />
 {/snippet}
 
 <ConnectVMcp bind:this={connectVMcpDialog} />

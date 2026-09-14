@@ -49,6 +49,7 @@
 	let loading = $state(false);
 	let error = $state<string>();
 	let oauthURL = $state<string>();
+	let oauthValidating = $state(false);
 	let listeningOauthVisibility = $state(false);
 	let requestGeneration = 0;
 	let requestController: AbortController | undefined;
@@ -70,11 +71,14 @@
 		return value?.id || value?.mcpServerCatalogEntryID || '';
 	}
 
-	function cancelToolPreviewRequest() {
+	function cancelToolPreviewRequest(preserveOauthState = false) {
 		requestGeneration += 1;
 		requestController?.abort();
 		requestController = undefined;
 		listeningOauthVisibility = false;
+		if (!preserveOauthState) {
+			oauthValidating = false;
+		}
 		loading = false;
 	}
 
@@ -104,6 +108,7 @@
 
 	function handleVisibilityChange() {
 		if (dialogPhase === 'setup' && document.visibilityState === 'visible' && oauthURL && !loading) {
+			oauthValidating = true;
 			void fetchLiveTools();
 		}
 	}
@@ -124,7 +129,7 @@
 			return;
 		}
 
-		cancelToolPreviewRequest();
+		cancelToolPreviewRequest(oauthValidating);
 		const controller = new AbortController();
 		requestController = controller;
 		const generation = requestGeneration;
@@ -142,6 +147,7 @@
 			error = undefined;
 			oauthURL = undefined;
 			listeningOauthVisibility = false;
+			oauthValidating = false;
 			openEditor();
 		} catch (err: unknown) {
 			if (!isCurrentRequest(generation, controller)) return;
@@ -167,11 +173,14 @@
 					error = oauthError instanceof Error ? oauthError.message : message;
 					oauthURL = undefined;
 					listeningOauthVisibility = false;
+				} finally {
+					oauthValidating = false;
 				}
 			} else {
 				error = message || 'Failed to fetch tools for this vMCP component.';
 				oauthURL = undefined;
 				listeningOauthVisibility = false;
+				oauthValidating = false;
 			}
 		} finally {
 			if (isCurrentRequest(generation, controller)) {
@@ -257,48 +266,61 @@
 	class="md:w-md"
 	onClose={cancelSetup}
 >
-	{#if configuringEntry}
-		{#if oauthURL}
-			<p class="mb-4 text-sm">
-				MCP server requires OAuth authentication before its tools can be fetched.
-			</p>
-		{:else if !refresh && tools.length > 0}
-			<p class="text-muted-content mb-6 text-sm font-light">
-				Tools are read from the catalog-entry snapshot stored on this vMCP. The source catalog entry
-				is not queried while editing an existing component.
-			</p>
-		{:else}
-			<p class="text-muted-content mb-6 text-sm font-light">
-				Fetch tools using this component's stored configuration before editing.
-			</p>
-		{/if}
-
-		{#if error}
-			<p class="text-error mb-4 text-sm" role="alert">{error}</p>
-		{/if}
-		<div class="flex w-full flex-col gap-2">
+	<div class="flex grow flex-col p-4 md:p-0">
+		{#if configuringEntry}
 			{#if oauthURL}
-				<a
-					in:fade
-					href={oauthURL}
-					rel="external noopener noreferrer"
-					target="_blank"
-					class="btn btn-primary"
-				>
-					Authenticate
-				</a>
+				<p class="mb-4 text-sm">
+					MCP server requires OAuth authentication before its tools can be fetched.
+				</p>
+			{:else if !refresh && tools.length > 0}
+				<p class="text-muted-content mb-6 text-sm font-light">
+					Tools are read from the catalog-entry snapshot stored on this vMCP. The source catalog
+					entry is not queried while editing an existing component.
+				</p>
 			{:else}
-				<button class="btn btn-primary" disabled={loading} onclick={configureTools}>
-					{#if loading}
-						<Loading class="text-primary-content size-4" />
-					{:else}
-						Configure Tools
-					{/if}
-				</button>
+				<p class="text-muted-content mb-6 text-sm font-light">
+					Fetch tools using this component's stored configuration before editing.
+				</p>
 			{/if}
-			<button class="btn btn-ghost rounded-full" onclick={cancelSetup}>Skip, I'll Do Later</button>
-		</div>
-	{/if}
+
+			{#if error}
+				<p class="text-error mb-4 text-sm" role="alert">{error}</p>
+			{/if}
+			<div class="flex w-full flex-col gap-2">
+				{#if oauthURL}
+					{#if oauthValidating}
+						<button
+							in:fade
+							class="btn btn-primary flex items-center justify-center gap-2"
+							disabled
+							type="button"
+						>
+							<Loading class="text-primary size-4" />
+							Validating authentication...
+						</button>
+					{:else}
+						<a
+							in:fade
+							href={oauthURL}
+							rel="external noopener noreferrer"
+							target="_blank"
+							class="btn btn-primary"
+						>
+							Authenticate
+						</a>
+					{/if}
+				{:else}
+					<button class="btn btn-primary" disabled={loading} onclick={configureTools}>
+						{#if loading}
+							<Loading class="text-primary-content size-4" />
+						{:else}
+							Configure Tools
+						{/if}
+					</button>
+				{/if}
+			</div>
+		{/if}
+	</div>
 </ResponsiveDialog>
 
 <CompositeEditTools
