@@ -466,7 +466,7 @@
 	});
 
 	const canShowCommunitySignup = $derived.by(() => {
-		if (!(profile.current.hasAdminAccess?.() || profile.current.isBootstrapUser?.())) return false;
+		if (!(profile.current.isAdmin?.() || profile.current.isBootstrapUser?.())) return false;
 		if (hasCommunityOrEnterpriseLicense) return false;
 		if (!communitySignupBannerDismissed.isReady) return false;
 		return !isCommunitySignupDismissedForCurrentProfile();
@@ -569,7 +569,7 @@
 			<div class="sticky top-0 left-0 z-50 w-full">
 				{#if banner}
 					{@render banner()}
-				{:else if hasLicenseEntitlementViolations || isNearUserLimit}
+				{:else if (hasLicenseEntitlementViolations || isNearUserLimit) && !profile.current.isAdminReadonly?.()}
 					<LicenseViolationBanner warnUserLimit={isNearUserLimit}>
 						{#snippet fallback()}
 							{#if showAppNotificationBanner}
