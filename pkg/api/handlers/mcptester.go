@@ -14,6 +14,8 @@ import (
 	"github.com/obot-platform/obot/pkg/accesscontrolrule"
 	"github.com/obot-platform/obot/pkg/api"
 	"github.com/obot-platform/obot/pkg/api/authz"
+	gserver "github.com/obot-platform/obot/pkg/gateway/server"
+	llmtypes "github.com/obot-platform/obot/pkg/llm"
 	"github.com/obot-platform/obot/pkg/mcp"
 	"github.com/obot-platform/obot/pkg/mcptester"
 	"github.com/obot-platform/obot/pkg/principal"
@@ -34,25 +36,34 @@ type mcpTesterHTTPClient interface {
 }
 
 type MCPTesterHandler struct {
-	storage        kclient.Client
-	serverResolver mcpTesterServerActionResolver
-	accessHelper   *accesscontrolrule.Helper
-	modelResolver  mcptester.ModelAccessResolver
-	serverURL      string
-	httpClient     mcpTesterHTTPClient
+	storage          kclient.Client
+	serverResolver   mcpTesterServerActionResolver
+	accessHelper     *accesscontrolrule.Helper
+	modelResolver    mcptester.ModelAccessResolver
+	serverURL        string
+	httpClient       mcpTesterHTTPClient
+	modelProxy       MCPTesterModelProxyOptions
+	modelProxyClient mcpTesterHTTPClient
 }
 
 func NewMCPTesterHandler(storage kclient.Client, serverResolver mcpTesterServerActionResolver, accessHelper *accesscontrolrule.Helper, modelResolver mcptester.ModelAccessResolver, serverURL string, httpClient *http.Client) *MCPTesterHandler {
+	return NewMCPTesterHandlerWithModelProxy(storage, serverResolver, accessHelper, modelResolver, serverURL, httpClient, MCPTesterModelProxyOptions{})
+}
+
+func NewMCPTesterHandlerWithModelProxy(storage kclient.Client, serverResolver mcpTesterServerActionResolver, accessHelper *accesscontrolrule.Helper, modelResolver mcptester.ModelAccessResolver, serverURL string, httpClient *http.Client, options MCPTesterModelProxyOptions) *MCPTesterHandler {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+
 	return &MCPTesterHandler{
-		storage:        storage,
-		serverResolver: serverResolver,
-		accessHelper:   accessHelper,
-		modelResolver:  modelResolver,
-		serverURL:      serverURL,
-		httpClient:     httpClient,
+		storage:          storage,
+		serverResolver:   serverResolver,
+		accessHelper:     accessHelper,
+		modelResolver:    modelResolver,
+		serverURL:        serverURL,
+		httpClient:       httpClient,
+		modelProxy:       options,
+		modelProxyClient: mcptester.NewModelProxyHTTPClient(),
 	}
 }
 
@@ -69,46 +80,106 @@ func (h *MCPTesterHandler) Chat(req api.Context) error {
 	if err != nil {
 		return writeMCPTesterError(req, http.StatusForbidden, types.MCPTesterErrorAccessDenied, "the MCP server is not available to this user", false)
 	}
+
 	if server.Spec.Template || server.Spec.CompositeName != "" {
 		return writeMCPTesterError(req, http.StatusForbidden, types.MCPTesterErrorAccessDenied, "the selected MCP server is not a connectable deployment", false)
 	}
 
-	model, err := mcptester.ResolveDefaultModel(req.Context(), h.storage, h.modelResolver, req.User)
+	useModelProxy, err := h.modelProxyEnabled(req.Context())
 	if err != nil {
-		status := http.StatusServiceUnavailable
-		if mcptester.IsModelResolutionError(err, mcptester.ModelResolutionErrorInaccessible) {
-			status = http.StatusForbidden
-		}
-		return writeMCPTesterError(req, status, types.MCPTesterErrorModelUnavailable, err.Error(), false)
+		return writeMCPTesterError(req, http.StatusServiceUnavailable, types.MCPTesterErrorModelUnavailable, "model configuration is unavailable or changing", false)
 	}
 
-	chatRequest, err := readMCPTesterChatRequest(&req)
+	model := mcptester.ResolvedModel{Dialect: llmtypes.DialectOpenAIResponses}
+	if !useModelProxy {
+		model, err = mcptester.ResolveDefaultModel(req.Context(), h.storage, h.modelResolver, req.User)
+		if err != nil {
+			status := http.StatusServiceUnavailable
+			if mcptester.IsModelResolutionError(err, mcptester.ModelResolutionErrorInaccessible) {
+				status = http.StatusForbidden
+			}
+
+			return writeMCPTesterError(req, status, types.MCPTesterErrorModelUnavailable, err.Error(), false)
+		}
+	}
+
+	chatRequest, err := readMCPTesterChatRequest(&req, useModelProxy)
 	if err != nil {
 		if httpErr, ok := errors.AsType[*types.ErrHTTP](err); ok {
 			return writeMCPTesterError(req, httpErr.Code, types.MCPTesterErrorInvalidRequest, httpErr.Message, false)
 		}
+
 		return writeMCPTesterError(req, http.StatusBadRequest, types.MCPTesterErrorInvalidRequest, err.Error(), false)
 	}
 
-	body, err := mcptester.BuildModelRequest(chatRequest, model, testerSystemInstruction(server))
-	if err != nil {
-		return writeMCPTesterError(req, http.StatusBadRequest, types.MCPTesterErrorInvalidRequest, err.Error(), false)
+	ctx := req.Context()
+	var (
+		proxyRequest *http.Request
+		body         []byte
+		audit        *gserver.TesterAudit
+		outcome      error
+	)
+
+	outboundClient := h.httpClient
+	if useModelProxy {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, mcptester.ModelProxyTimeout)
+		defer cancel()
+
+		proxyRequest, body, err = h.modelProxyRequest(ctx, chatRequest, server, req.Request.Header)
+		if err != nil {
+			status, code, message, retryable := http.StatusServiceUnavailable, types.MCPTesterErrorProvider, "The installation license could not be read. Try again later.", true
+			if errors.Is(err, errMCPTesterLicenseRequired) {
+				status, code, message, retryable = http.StatusForbidden, types.MCPTesterErrorLicenseRequired, errMCPTesterLicenseRequired.Error(), false
+			} else if httpErr, ok := errors.AsType[*types.ErrHTTP](err); ok && httpErr.Code == http.StatusBadRequest {
+				status, code, message, retryable = http.StatusBadRequest, types.MCPTesterErrorInvalidRequest, httpErr.Message, false
+			}
+
+			return writeMCPTesterError(req, status, code, message, retryable)
+		}
+
+		outboundClient = h.modelProxyClient
+		audit = gserver.NewTesterAudit(h.modelProxy.GatewayClient, req.Request, req.User, body)
+		defer func() { audit.Finish(ctx, outcome) }()
+	} else {
+		body, err = mcptester.BuildModelRequest(chatRequest, model, testerSystemInstruction(server))
+		if err != nil {
+			return writeMCPTesterError(req, http.StatusBadRequest, types.MCPTesterErrorInvalidRequest, err.Error(), false)
+		}
+
+		proxyRequest, err = mcptester.NewLLMProxyRequest(ctx, h.serverURL, model, body, req.Request.Header)
+		if err != nil {
+			return writeMCPTesterError(req, http.StatusInternalServerError, types.MCPTesterErrorProvider, "failed to prepare model request", true)
+		}
 	}
 
-	proxyRequest, err := mcptester.NewLLMProxyRequest(req.Context(), h.serverURL, model, body, req.Request.Header)
+	response, err := outboundClient.Do(proxyRequest)
 	if err != nil {
-		return writeMCPTesterError(req, http.StatusInternalServerError, types.MCPTesterErrorProvider, "failed to prepare model request", true)
-	}
-	response, err := h.httpClient.Do(proxyRequest)
-	if err != nil {
-		if req.Context().Err() != nil || errors.Is(err, context.Canceled) {
+		outcome = err
+		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 			return writeMCPTesterError(req, http.StatusRequestTimeout, types.MCPTesterErrorCancelled, "request cancelled", false)
 		}
+
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return writeMCPTesterError(req, http.StatusGatewayTimeout, types.MCPTesterErrorProvider, "The model service timed out. Try again later.", true)
+		}
+
 		return writeMCPTesterError(req, http.StatusBadGateway, types.MCPTesterErrorProvider, "failed to contact the model provider", true)
 	}
+
 	defer response.Body.Close()
 
+	input := io.Reader(response.Body)
+	if useModelProxy {
+		input = audit.Response(response)
+	}
+
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if useModelProxy {
+			outcome = errors.New("model proxy rejected request")
+			return writeMCPTesterModelProxyError(req, response.StatusCode, input)
+		}
+
 		return h.writeProxyError(req, response)
 	}
 
@@ -117,25 +188,48 @@ func (h *MCPTesterHandler) Chat(req api.Context) error {
 	req.WriteHeader(http.StatusOK)
 	req.Flush()
 
-	_ = mcptester.NormalizeStream(req.Context(), model.Dialect, chatRequest.Tools, response.Body, func(event types.MCPTesterStreamEvent) error {
+	streamErr := mcptester.NormalizeStream(ctx, model.Dialect, chatRequest.Tools, input, func(event types.MCPTesterStreamEvent) error {
+		if useModelProxy && event.Error != nil {
+			outcome = errors.New("model proxy stream failed")
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				event.Error.Message = "The model service timed out. Try again later."
+			} else if event.Error.Code != types.MCPTesterErrorCancelled {
+				event.Error.Message = "The MCP Tester model service could not complete the response. Try again later."
+			}
+		}
+
 		data, err := json.Marshal(event)
 		if err != nil {
 			return err
 		}
+
 		if _, err := fmt.Fprintf(req.ResponseWriter, "data: %s\n\n", data); err != nil {
 			return err
 		}
+
 		req.Flush()
 		return nil
 	})
+
+	if streamErr != nil {
+		outcome = streamErr
+	}
+
 	return nil
 }
 
-func readMCPTesterChatRequest(req *api.Context) (types.MCPTesterChatRequest, error) {
-	body, err := req.Body()
+func readMCPTesterChatRequest(req *api.Context, useModelProxy bool) (types.MCPTesterChatRequest, error) {
+	var bodyOptions api.BodyOptions
+	if useModelProxy {
+		bodyOptions.MaxBytes = mcptester.ModelProxyMaxBodyBytes
+		req.Request.Body = http.MaxBytesReader(req.ResponseWriter, req.Request.Body, mcptester.ModelProxyMaxBodyBytes)
+	}
+
+	body, err := req.Body(bodyOptions)
 	if err != nil {
 		return types.MCPTesterChatRequest{}, err
 	}
+
 	if len(body) == 0 {
 		return types.MCPTesterChatRequest{}, fmt.Errorf("request body must not be empty")
 	}
@@ -146,9 +240,11 @@ func readMCPTesterChatRequest(req *api.Context) (types.MCPTesterChatRequest, err
 	if err := decoder.Decode(&request); err != nil {
 		return types.MCPTesterChatRequest{}, fmt.Errorf("invalid request body: %w", err)
 	}
+
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return types.MCPTesterChatRequest{}, fmt.Errorf("request body must contain exactly one JSON value")
 	}
+
 	return request, nil
 }
 

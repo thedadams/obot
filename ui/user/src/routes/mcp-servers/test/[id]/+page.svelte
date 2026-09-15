@@ -5,6 +5,8 @@
 	import McpCompositeOauth from '$lib/components/mcp/McpCompositeOauth.svelte';
 	import Tester from '$lib/components/mcp/tester/Tester.svelte';
 	import { VirtualPageViewport } from '$lib/components/ui/virtual-page';
+	import { testerChatAvailability } from '$lib/services/mcp/tester.svelte';
+	import { version } from '$lib/stores';
 	import { Server, ArrowLeft } from '@lucide/svelte';
 	import type { Component } from 'svelte';
 
@@ -18,25 +20,11 @@
 	}
 
 	let serverName = $derived(data.server.alias || data.server.manifest.name || data.server.id);
-	let configuredDefault = $derived(
-		data.defaultModelAliases?.find((alias) => alias.alias === 'llm')
+	let chatAvailability = $derived(
+		testerChatAvailability(version.current, data.defaultModelAliases, data.models)
 	);
-	let defaultModel = $derived(
-		configuredDefault?.model
-			? data.models?.find(
-					(model) =>
-						model.active &&
-						(model.id === configuredDefault?.model ||
-							(model.aliasAssigned && model.alias === configuredDefault?.model))
-				)
-			: undefined
-	);
-	let chatAvailable = $derived(Boolean(configuredDefault?.model && defaultModel));
-	let chatUnavailableMessage = $derived(
-		!configuredDefault?.model
-			? 'No default llm model is configured. Configure one to use Chat.'
-			: 'The configured default llm model is inactive or unavailable to your account.'
-	);
+	let chatAvailable = $derived(chatAvailability.available);
+	let chatUnavailableMessage = $derived(chatAvailability.unavailableMessage);
 </script>
 
 <Layout
