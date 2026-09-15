@@ -174,7 +174,7 @@ func collectMCPEntryMetrics(ctx context.Context, storageClient kclient.Reader, d
 	builtIns := make([]clienttypes.ProductTelemetryBuiltInMCPServer, 0)
 	var customCount int64
 	for _, entry := range entries.Items {
-		if strings.TrimSuffix(mcp.SourceIDForURL(entry.Spec.SourceURL), ".git") != builtInMCPCatalogSourceURL {
+		if !strings.HasPrefix(mcp.SourceIDForURL(entry.Spec.SourceURL), builtInMCPCatalogSourceURL) {
 			customCount++
 			continue
 		}

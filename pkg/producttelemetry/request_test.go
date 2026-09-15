@@ -344,6 +344,8 @@ func TestCollectMCPEntryMetricsNormalizesBuiltInSourceURL(t *testing.T) {
 		"http://" + builtInMCPCatalogSourceURL + "/",
 		"https://" + builtInMCPCatalogSourceURL + ".git",
 		"http://" + builtInMCPCatalogSourceURL + ".git/",
+		"https://" + builtInMCPCatalogSourceURL + "/v2-schema",
+		"https://" + builtInMCPCatalogSourceURL + ".git/v2-schema",
 	}
 
 	for _, sourceURL := range sourceURLs {
