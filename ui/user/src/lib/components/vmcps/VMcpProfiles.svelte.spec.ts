@@ -76,6 +76,10 @@ async function expandServerTools() {
 	await page.getByRole('button', { name: 'Expand' }).click();
 }
 
+function toolSwitch(index = 0) {
+	return page.getByRole('switch', { name: /^(Enable|Disable) tool$/ }).nth(index);
+}
+
 async function assignEveryone() {
 	await page.getByRole('combobox', { name: 'Add identities...' }).click();
 	await page.getByRole('button', { name: 'All Obot Users', exact: true }).click();
@@ -106,7 +110,7 @@ describe('VMcpProfiles.svelte', () => {
 		await expandServerTools();
 		await expect.element(page.getByText('list_issues')).toBeVisible();
 		await expect.element(page.getByText('list_pulls')).toBeVisible();
-		await page.getByRole('checkbox').nth(1).click();
+		await toolSwitch(1).click();
 		await expect.element(page.getByText('1 of 2 tools')).toBeVisible();
 		await assignEveryone();
 		await page.getByRole('button', { name: 'Create profile', exact: true }).click();
@@ -275,7 +279,7 @@ describe('VMcpProfiles.svelte', () => {
 		await expect.element(page.getByText('2 of 2 tools')).toBeVisible();
 		await expect.element(page.getByText('list_issues')).toBeVisible();
 		await expect.element(page.getByText('list_pulls')).toBeVisible();
-		await expect.element(page.getByRole('checkbox').first()).toBeChecked();
+		await expect.element(toolSwitch()).toBeChecked();
 		await vi.waitFor(() => expect(saved).toHaveBeenCalled());
 		expect((saved.mock.calls[0][0] as VMCPManifest).components?.[0].toolOverrides).toEqual([
 			{ name: 'list_issues', enabled: true },
@@ -312,10 +316,10 @@ describe('VMcpProfiles.svelte', () => {
 		await page.getByRole('button', { name: 'Create profile', exact: true }).click();
 		await expandServerTools();
 
-		await expect.element(page.getByRole('checkbox').nth(0)).toBeChecked();
-		await expect.element(page.getByRole('checkbox').nth(0)).toBeEnabled();
-		await expect.element(page.getByRole('checkbox').nth(1)).not.toBeChecked();
-		await expect.element(page.getByRole('checkbox').nth(1)).toBeDisabled();
+		await expect.element(toolSwitch(0)).toBeChecked();
+		await expect.element(toolSwitch(0)).toBeEnabled();
+		await expect.element(toolSwitch(1)).not.toBeChecked();
+		await expect.element(toolSwitch(1)).toBeDisabled();
 	});
 
 	it('saves a locked component tool as disabled even when enabled is omitted', async () => {
@@ -331,8 +335,8 @@ describe('VMcpProfiles.svelte', () => {
 		await page.getByLabelText('Name').fill('Support engineers');
 		await expect.element(page.getByText('1 of 1 tools')).toBeVisible();
 		await expandServerTools();
-		await expect.element(page.getByRole('checkbox').nth(1)).not.toBeChecked();
-		await expect.element(page.getByRole('checkbox').nth(1)).toBeDisabled();
+		await expect.element(toolSwitch(1)).not.toBeChecked();
+		await expect.element(toolSwitch(1)).toBeDisabled();
 		await assignEveryone();
 		await page.getByRole('button', { name: 'Create profile', exact: true }).click();
 
@@ -352,7 +356,7 @@ describe('VMcpProfiles.svelte', () => {
 		await page.getByLabelText('Name').fill('Support engineers');
 		await expandServerTools();
 
-		const disabled = page.getByRole('checkbox').nth(1);
+		const disabled = toolSwitch(1);
 		await expect.element(disabled).not.toBeChecked();
 		await expect.element(disabled).toBeDisabled();
 		await expect.element(page.getByText('Disabled on this vMCP.')).toBeVisible();
@@ -408,11 +412,11 @@ describe('VMcpProfiles.svelte', () => {
 
 		await page.getByRole('button', { name: 'Create profile', exact: true }).click();
 		await expandServerTools();
-		await page.getByRole('checkbox').nth(1).click();
+		await toolSwitch(1).click();
 
 		await expect.element(page.getByText('1 of 2 tools')).toBeVisible();
 		await expect.element(page.getByText('list_pulls')).toBeVisible();
-		await page.getByRole('checkbox').nth(1).click();
+		await toolSwitch(1).click();
 		await expect.element(page.getByText('2 of 2 tools')).toBeVisible();
 	});
 
@@ -453,5 +457,98 @@ describe('VMcpProfiles.svelte', () => {
 		await expect.element(page.getByText('All Obot Users', { exact: true })).toBeVisible();
 		await page.getByRole('button', { name: 'Remove All Obot Users' }).click();
 		await expect.element(page.getByText('No people or groups assigned.')).toBeVisible();
+	});
+
+	it('shows a group name on the profile card instead of its directory id', async () => {
+		const group = { id: 'entra/engineering-oid', name: 'Platform Engineering' };
+		worker.use(
+			http.get('/api/groups', ({ request }) => {
+				const ids = new URL(request.url).searchParams.get('ids') ?? '';
+				return HttpResponse.json({
+					items: ids.split(',').includes(group.id) ? [group] : []
+				});
+			})
+		);
+		const vmcp = createVMcp('vmcp-group-card-name');
+		vmcp.profiles = [
+			{
+				name: 'Limited tools',
+				subjects: [{ type: 'group', id: group.id }],
+				allowAllTools: true
+			}
+		];
+		render(VMcpProfiles, { vmcp, toolFlow: toolFlowStub() });
+
+		await expect.element(page.getByText('Platform Engineering')).toBeVisible();
+		await expect.element(page.getByText(group.id)).not.toBeInTheDocument();
+	});
+
+	it('keeps a selected group name after the search listing no longer includes it', async () => {
+		const group = { id: 'entra/engineering-oid', name: 'Platform Engineering' };
+		worker.use(
+			http.get('/api/groups', ({ request }) => {
+				const url = new URL(request.url);
+				if (url.searchParams.get('ids')) {
+					return HttpResponse.json({ items: [group] });
+				}
+				if (url.searchParams.get('name')) {
+					return HttpResponse.json({ items: [group] });
+				}
+				return HttpResponse.json({ items: [{ id: 'entra/other', name: 'Other Team' }] });
+			})
+		);
+		render(VMcpProfiles, {
+			vmcp: createVMcp('vmcp-group-picker-name'),
+			toolFlow: toolFlowStub()
+		});
+
+		await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+		await page.getByRole('combobox', { name: 'Add identities...' }).click();
+		await page.getByPlaceholder('Search users or groups...').fill('Platform');
+		await expect.element(page.getByRole('button', { name: 'Platform Engineering' })).toBeVisible();
+		await page.getByRole('button', { name: 'Platform Engineering' }).click();
+
+		await expect.element(page.getByText('Platform Engineering', { exact: true })).toBeVisible();
+		await expect.element(page.getByText(group.id)).not.toBeInTheDocument();
+	});
+
+	it('keeps search and toggle all from changing tools locked by the vMCP', async () => {
+		const vmcp = createVMcpWithDisabledTool('vmcp-locked-search-toggle');
+		render(VMcpProfiles, { vmcp, toolFlow: toolFlowStub() });
+
+		await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+		await expandServerTools();
+
+		await expect.element(page.getByPlaceholder('Search tools...')).toBeVisible();
+		const toggleAll = page.getByRole('switch', { name: 'Enable All Tools' });
+		await expect.element(toggleAll).toBeVisible();
+		await expect.element(toggleAll).toBeChecked();
+
+		const unlocked = toolSwitch(0);
+		const locked = toolSwitch(1);
+		await expect.element(unlocked).toBeChecked();
+		await expect.element(unlocked).toBeEnabled();
+		await expect.element(locked).not.toBeChecked();
+		await expect.element(locked).toBeDisabled();
+
+		await toggleAll.click();
+		await expect.element(page.getByText('0 of 1 tools')).toBeVisible();
+		await expect.element(unlocked).not.toBeChecked();
+		await expect.element(locked).not.toBeChecked();
+		await expect.element(locked).toBeDisabled();
+		await expect.element(page.getByText('Disabled on this vMCP.')).toBeVisible();
+
+		await toggleAll.click();
+		await expect.element(page.getByText('1 of 1 tools')).toBeVisible();
+		await expect.element(unlocked).toBeChecked();
+		await expect.element(locked).not.toBeChecked();
+		await expect.element(locked).toBeDisabled();
+
+		await page.getByPlaceholder('Search tools...').fill('pulls');
+		await expect.element(page.getByText('list_pulls')).toBeVisible();
+		await expect.element(page.getByText('list_issues')).not.toBeInTheDocument();
+		await expect.element(toolSwitch()).not.toBeChecked();
+		await expect.element(toolSwitch()).toBeDisabled();
+		await expect.element(page.getByText('Disabled on this vMCP.')).toBeVisible();
 	});
 });

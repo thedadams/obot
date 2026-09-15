@@ -1,4 +1,4 @@
-import { createMCPCatalogEntry, createVMCP } from '../../../tests/helpers/mcp';
+import { createMCPCatalogEntry, createVMCP, createVMCPComponent } from '../../../tests/helpers/mcp';
 import { SHORT_DESCRIPTION_MAX_LENGTH } from './constants';
 import type { RectLike } from './types';
 import {
@@ -8,14 +8,23 @@ import {
 	buildVMcpComponentFilterOptions,
 	buildWirePath,
 	catalogConfigurationFields,
+	configurationForSnapshotUpdate,
+	configurationWithRevealedValues,
 	distanceToRect,
 	filterMcpServersByCategories,
+	filterVMcps,
 	isJoinedComponentLabel,
 	isWorkspaceOwned,
 	joinComponentLabels,
 	matchesQuery,
 	sortMcpServers,
-	sortVMcps
+	sortVMcps,
+	vmcpComponentDiffServers,
+	vmcpHasUserAllowedConfiguration,
+	vmcpInstanceNeedsUserConfiguration,
+	vmcpNeedsUpdate,
+	vmcpOutdatedComponents,
+	vmcpUpdateConfigurationTargets
 } from './utils';
 import { describe, expect, it } from 'vitest';
 
@@ -132,6 +141,67 @@ describe('sortVMcps', () => {
 			'vmcp-a',
 			'vmcp-z'
 		]);
+	});
+});
+
+describe('filterVMcps', () => {
+	const shared = createVMCP({
+		id: 'vmcp-shared',
+		displayName: 'Shared Catalog',
+		userID: undefined
+	});
+	const personal = createVMCP({
+		id: 'vmcp-personal',
+		displayName: 'Personal Workspace',
+		userID: 'user-1'
+	});
+	const owners = new Map([
+		[
+			'user-1',
+			{
+				id: 'user-1',
+				username: 'alice',
+				email: 'alice@example.com',
+				created: '2026-01-01T00:00:00.000Z',
+				explicitRole: false,
+				role: 0,
+				effectiveRole: 0,
+				groups: [],
+				iconURL: ''
+			}
+		]
+	]);
+
+	it('finds shared vMCPs without a userID by display name', () => {
+		expect(
+			filterVMcps([shared, personal], { query: 'shared' }, owners).map((vmcp) => vmcp.id)
+		).toEqual(['vmcp-shared']);
+	});
+
+	it('safely handles owners without username or email', () => {
+		const incompleteOwners = new Map([
+			[
+				'user-1',
+				{
+					id: 'user-1',
+					username: undefined as unknown as string,
+					email: undefined as unknown as string,
+					created: '2026-01-01T00:00:00.000Z',
+					explicitRole: false,
+					role: 0,
+					effectiveRole: 0,
+					groups: [],
+					iconURL: ''
+				}
+			]
+		]);
+
+		expect(() =>
+			filterVMcps([shared, personal], { query: 'shared' }, incompleteOwners).map((vmcp) => vmcp.id)
+		).not.toThrow();
+		expect(
+			filterVMcps([shared, personal], { query: 'shared' }, incompleteOwners).map((vmcp) => vmcp.id)
+		).toEqual(['vmcp-shared']);
 	});
 });
 
@@ -339,5 +409,195 @@ describe('appendComponentLabel', () => {
 		const next = appendComponentLabel(existing, [existing], added, SHORT_DESCRIPTION_MAX_LENGTH);
 		expect(next).toHaveLength(SHORT_DESCRIPTION_MAX_LENGTH);
 		expect(next?.startsWith(existing)).toBe(true);
+	});
+});
+
+describe('vmcpNeedsUpdate', () => {
+	it('detects when any vMCP component needs an update', () => {
+		const vmcp = createVMCP({ id: 'vmcp-1' });
+		expect(vmcpNeedsUpdate(vmcp)).toBe(false);
+		vmcp.status = {
+			components: [
+				{ name: 'slack', needsUpdate: false },
+				{ name: 'github', needsUpdate: true }
+			]
+		};
+		expect(vmcpNeedsUpdate(vmcp)).toBe(true);
+	});
+});
+
+describe('vmcpHasUserAllowedConfiguration', () => {
+	it('is true when a component has a user-allowed policy', () => {
+		const vmcp = createVMCP({ id: 'vmcp-1' });
+		expect(vmcpHasUserAllowedConfiguration(vmcp)).toBe(false);
+		vmcp.components![0].configuration = [{ key: 'API_TOKEN', policy: 'userAllowed' }];
+		expect(vmcpHasUserAllowedConfiguration(vmcp)).toBe(true);
+	});
+});
+
+describe('vmcpInstanceNeedsUserConfiguration', () => {
+	it('is true when the instance is missing required configuration', () => {
+		expect(vmcpInstanceNeedsUserConfiguration()).toBe(false);
+		expect(
+			vmcpInstanceNeedsUserConfiguration({
+				id: 'vmcpi-1',
+				vmcpID: 'vmcp-1',
+				userID: 'user-1',
+				created: '2026-01-01T00:00:00Z',
+				status: { missingRequiredConfiguration: ['component-1.API_TOKEN'] }
+			})
+		).toBe(true);
+	});
+});
+
+describe('vmcpOutdatedComponents', () => {
+	it('returns outdated components and diff targets from catalog entries', () => {
+		const entry = createMCPCatalogEntry({ id: 'entry-1', name: 'GitHub' });
+		const vmcp = createVMCP(
+			{
+				status: {
+					components: [{ name: 'GitHub', needsUpdate: true }]
+				}
+			},
+			[entry]
+		);
+		const updatedEntry = createMCPCatalogEntry({
+			id: 'entry-1',
+			name: 'GitHub',
+			manifest: { shortDescription: 'Updated description' }
+		});
+
+		expect(vmcpOutdatedComponents(vmcp)).toHaveLength(1);
+		expect(vmcpComponentDiffServers(vmcp.components![0], updatedEntry)).toMatchObject({
+			fromServer: {
+				id: 'entry-1',
+				manifest: vmcp.components![0].catalogEntry.manifest
+			},
+			toServer: updatedEntry
+		});
+	});
+});
+
+describe('vmcpUpdateConfigurationTargets', () => {
+	it('uses the latest catalog entry when an outdated component has configuration', () => {
+		const snapshot = createMCPCatalogEntry({ id: 'entry-1', name: 'GitHub' });
+		const latest = createMCPCatalogEntry({
+			id: 'entry-1',
+			name: 'GitHub',
+			manifest: {
+				config: [
+					{
+						key: 'API_TOKEN',
+						name: 'API token',
+						description: 'Token',
+						required: true,
+						sensitive: true,
+						value: '',
+						usage: 'env'
+					}
+				]
+			}
+		});
+		const vmcp = createVMCP(
+			{
+				status: {
+					components: [{ name: 'GitHub', needsUpdate: true }]
+				}
+			},
+			[snapshot]
+		);
+
+		expect(vmcpUpdateConfigurationTargets(vmcp, [latest])).toEqual([
+			{ component: vmcp.components![0], entry: latest }
+		]);
+		expect(vmcpUpdateConfigurationTargets(vmcp, [snapshot])).toEqual([]);
+		expect(vmcpUpdateConfigurationTargets(vmcp, [])).toEqual([]);
+	});
+});
+
+describe('configurationForSnapshotUpdate', () => {
+	function snapshotComponent(
+		config: Array<{
+			key: string;
+			required?: boolean;
+			value?: string;
+			secretBinding?: { name: string; key: string };
+		}>,
+		configuration: Array<{
+			key: string;
+			policy?: 'prohibited' | 'fixed' | 'userAllowed';
+			value?: string;
+		}>
+	) {
+		const entry = createMCPCatalogEntry({
+			id: 'entry-1',
+			name: 'Everything',
+			manifest: {
+				config: config.map((field) => ({
+					key: field.key,
+					name: field.key,
+					description: field.key,
+					required: field.required ?? false,
+					sensitive: false,
+					value: field.value ?? '',
+					usage: 'env' as const,
+					...(field.secretBinding ? { secretBinding: field.secretBinding } : {})
+				}))
+			}
+		});
+		return createVMCPComponent(entry, { configuration });
+	}
+
+	it('keeps required snapshot keys omitted from the latest catalog payload', () => {
+		const component = snapshotComponent(
+			[{ key: 'TEST_KEY_B', required: true }],
+			[{ key: 'TEST_KEY_B', policy: 'fixed', value: '******' }]
+		);
+
+		expect(
+			configurationForSnapshotUpdate(component, [{ key: 'API_TOKEN', policy: 'userAllowed' }])
+		).toEqual([
+			{ key: 'API_TOKEN', policy: 'userAllowed' },
+			{ key: 'TEST_KEY_B', policy: 'fixed' }
+		]);
+	});
+
+	it('does not keep keys already present, optional, or catalog-supplied', () => {
+		const component = snapshotComponent(
+			[
+				{ key: 'TOKEN', required: true },
+				{ key: 'OPTIONAL' },
+				{ key: 'STATIC', required: true, value: 'catalog' },
+				{ key: 'BOUND', required: true, secretBinding: { name: 'config', key: 'token' } }
+			],
+			[
+				{ key: 'TOKEN', policy: 'fixed', value: 'secret' },
+				{ key: 'OPTIONAL', policy: 'prohibited' },
+				{ key: 'STATIC', policy: 'prohibited' },
+				{ key: 'BOUND', policy: 'userAllowed' },
+				{ key: 'GONE', policy: 'fixed', value: 'stale' }
+			]
+		);
+
+		expect(
+			configurationForSnapshotUpdate(component, [{ key: 'TOKEN', policy: 'userAllowed' }])
+		).toEqual([{ key: 'TOKEN', policy: 'userAllowed' }]);
+	});
+});
+
+describe('configurationWithRevealedValues', () => {
+	it('fills fixed policies from revealed secrets', () => {
+		expect(
+			configurationWithRevealedValues(
+				[
+					{ key: 'API_TOKEN', policy: 'fixed', value: '******' },
+					{ key: 'REGION', policy: 'userAllowed' }
+				],
+				{ API_TOKEN: 'secret' }
+			)
+		).toEqual([
+			{ key: 'API_TOKEN', policy: 'fixed', value: 'secret' },
+			{ key: 'REGION', policy: 'userAllowed' }
+		]);
 	});
 });

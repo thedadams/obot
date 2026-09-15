@@ -47,6 +47,7 @@
 		ExternalLink,
 		GitCompare,
 		Layers,
+		Layers2,
 		Power,
 		Server,
 		ServerCog,
@@ -295,12 +296,18 @@
 	}
 
 	function canTriggerUpdate(server: MCPCatalogServer) {
+		if (server.vmcpComponentID) return false;
 		if (!isMultiUserServer(server)) return true;
 		return !!server.catalogEntryID && (!!server.powerUserWorkspaceID || !!id);
 	}
 
 	function canRestartServer(server: MCPCatalogServer) {
 		return server.configured && supportsMCPBackendDetails(server);
+	}
+
+	function canDeleteServer(server: MCPCatalogServer & { isMyServer?: boolean }) {
+		if (server.vmcpComponentID) return false;
+		return !!(server.isMyServer || (hasAdminAccess && !readonly));
 	}
 
 	async function handleBulkUpdate() {
@@ -490,7 +497,11 @@
 
 	async function handleBulkDelete() {
 		for (const id of Object.keys(selected)) {
-			await handleSingleDelete(selected[id]);
+			const server = selected[id];
+			if (!canDeleteServer(server)) {
+				continue;
+			}
+			await handleSingleDelete(server);
 		}
 		selected = {};
 	}
@@ -662,7 +673,9 @@
 							{:else if d.needsUpdate}
 								<div
 									use:tooltip={{
-										text: 'This deployment needs an update. View Diff to see the changes.',
+										text: d.vmcpComponentID
+											? 'In order to update, update the vMCP.'
+											: 'This deployment needs an update. View Diff to see the changes.',
 										classes: ['wrap-break-word', 'w-58']
 									}}
 								>
@@ -722,60 +735,63 @@
 										{/if}
 									</span>
 								</a>
-								{#if (d.isMyServer || (hasAdminAccess && !readonly)) && hasEditableDeploymentConfiguration(d)}
-									<button
-										class="menu-button"
-										onclick={(e) => {
-											e.stopPropagation();
-											editExistingDialog?.edit({
-												server: d,
-												entry: d.catalogEntryID ? entriesMap[d.catalogEntryID] : undefined
-											});
-											toggle(false);
-										}}
-									>
-										<ServerCog class="size-4" /> Edit Configuration
-									</button>
-								{/if}
-								{#if d.needsUpdate && canTriggerUpdate(d) && (d.isMyServer || (hasAdminAccess && !readonly))}
-									<button
-										class="menu-button-primary"
-										disabled={updating[d.id]?.inProgress || readonly}
-										onclick={(e) => {
-											e.stopPropagation();
-											if (!d) return;
-											showUpgradeConfirm = {
-												type: 'single',
-												server: d
-											};
-											toggle(false);
-										}}
-									>
-										{#if updating[d.id]?.inProgress}
-											<Loading class="size-4" />
-										{:else}
-											<CircleFadingArrowUp class="size-4" />
-										{/if}
-										Update Server
-									</button>
-								{/if}
 
-								{#if d.catalogEntryID && d.needsUpdate}
-									<button
-										class="menu-button-primary"
-										disabled={updating[d.id]?.inProgress || readonly}
-										onclick={(e) => {
-											e.stopPropagation();
-											if (!d.catalogEntryID) return;
+								{#if !isVmcpComponent}
+									{#if (d.isMyServer || (hasAdminAccess && !readonly)) && hasEditableDeploymentConfiguration(d)}
+										<button
+											class="menu-button"
+											onclick={(e) => {
+												e.stopPropagation();
+												editExistingDialog?.edit({
+													server: d,
+													entry: d.catalogEntryID ? entriesMap[d.catalogEntryID] : undefined
+												});
+												toggle(false);
+											}}
+										>
+											<ServerCog class="size-4" /> Edit Configuration
+										</button>
+									{/if}
+									{#if d.needsUpdate && canTriggerUpdate(d) && (d.isMyServer || (hasAdminAccess && !readonly))}
+										<button
+											class="menu-button-primary"
+											disabled={updating[d.id]?.inProgress || readonly}
+											onclick={(e) => {
+												e.stopPropagation();
+												if (!d) return;
+												showUpgradeConfirm = {
+													type: 'single',
+													server: d
+												};
+												toggle(false);
+											}}
+										>
+											{#if updating[d.id]?.inProgress}
+												<Loading class="size-4" />
+											{:else}
+												<CircleFadingArrowUp class="size-4" />
+											{/if}
+											Update Server
+										</button>
+									{/if}
 
-											existingServer = d;
-											updatedServer = entriesMap[d.catalogEntryID];
-											diffDialog?.open();
-											toggle(false);
-										}}
-									>
-										<GitCompare class="size-4" /> View Diff
-									</button>
+									{#if d.catalogEntryID && d.needsUpdate}
+										<button
+											class="menu-button-primary"
+											disabled={updating[d.id]?.inProgress || readonly}
+											onclick={(e) => {
+												e.stopPropagation();
+												if (!d.catalogEntryID) return;
+
+												existingServer = d;
+												updatedServer = entriesMap[d.catalogEntryID];
+												diffDialog?.open();
+												toggle(false);
+											}}
+										>
+											<GitCompare class="size-4" /> View Diff
+										</button>
+									{/if}
 								{/if}
 
 								{#if (d.isMyServer || (hasAdminAccess && !readonly)) && d.needsK8sUpdate}
@@ -799,6 +815,28 @@
 										{/if}
 										Update Scheduling Config
 									</button>
+								{/if}
+
+								{#if d.vmcpID}
+									<a href={resolve(`/vmcps/${d.vmcpID}`)} class="menu-button">
+										<Layers class="size-4" />
+										View vMCP
+									</a>
+									<a href={resolve(`/vmcps?view=deployments&id=${d.vmcpID}`)} class="menu-button">
+										<Layers2 class="size-4" />
+										View vMCP Deployments
+									</a>
+								{:else if d.vmcpInstanceID}
+									{@const instance = deployedVmcpInstancesMap.get(d.vmcpInstanceID)}
+									{#if instance}
+										<a
+											href={resolve(`/vmcps/${instance.vmcpID}/instance/${instance.id}`)}
+											class="menu-button"
+										>
+											<Layers class="size-4" />
+											View vMCP Deployment
+										</a>
+									{/if}
 								{/if}
 
 								{#if isRestartableServer(d) && (d.isMyServer || (hasAdminAccess && !readonly))}
@@ -845,24 +883,6 @@
 									</button>
 								{/if}
 
-								{#if d.vmcpID}
-									<a href={resolve(`/vmcps?view=deployments&id=${d.vmcpID}`)} class="menu-button">
-										<Layers class="size-4" />
-										View vMCP Deployments
-									</a>
-								{:else if d.vmcpInstanceID}
-									{@const instance = deployedVmcpInstancesMap.get(d.vmcpInstanceID)}
-									{#if instance}
-										<a
-											href={resolve(`/vmcps/${instance.vmcpID}/instance/${instance.id}`)}
-											class="menu-button"
-										>
-											<Layers class="size-4" />
-											View vMCP Deployment
-										</a>
-									{/if}
-								{/if}
-
 								{#if !isVmcpComponent && (d.isMyServer || (hasAdminAccess && !readonly))}
 									<button
 										class="menu-button-destructive"
@@ -894,7 +914,9 @@
 					{@const k8sUpgradeableCount = Object.values(currentSelected).filter(
 						(s) => s.needsK8sUpdate
 					).length}
-					{@const deletableCount = Object.values(currentSelected).length}
+					{@const deletableCount = Object.values(currentSelected).filter((s) =>
+						canDeleteServer(s)
+					).length}
 
 					<div class="flex grow items-center justify-end gap-2 px-4 py-2">
 						<button
@@ -963,7 +985,9 @@
 						<button
 							class="btn btn-secondary flex items-center gap-1 text-sm font-normal"
 							onclick={() => {
-								selected = currentSelected;
+								selected = Object.fromEntries(
+									Object.entries(currentSelected).filter(([, s]) => canDeleteServer(s))
+								);
 								showDeleteConfirm = {
 									type: 'multi'
 								};
@@ -1099,7 +1123,9 @@
 	loading={deleting}
 	names={showDeleteConfirm?.type === 'single'
 		? [showDeleteConfirm.server.manifest.name ?? '']
-		: Object.values(selected).map((s) => s.manifest.name ?? '')}
+		: Object.values(selected)
+				.filter(canDeleteServer)
+				.map((s) => s.manifest.name ?? '')}
 />
 
 <EditExistingDeployment

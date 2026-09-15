@@ -2,11 +2,10 @@
 	import { page } from '$app/state';
 	import Layout from '$lib/components/Layout.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
-	import ConnectVMcp from '$lib/components/vmcps/ConnectVMcp.svelte';
 	import CreateEditVMcp from '$lib/components/vmcps/CreateEditVMcp.svelte';
 	import CreateVMcpButton from '$lib/components/vmcps/CreateVMcpButton.svelte';
 	import McpServersSidebar from '$lib/components/vmcps/McpServersSidebar.svelte';
-	import VMcpComponentConfigurationDialog from '$lib/components/vmcps/VMcpComponentConfigurationDialog.svelte';
+	import VMcpActions from '$lib/components/vmcps/VMcpActions.svelte';
 	import VMcpDragHint from '$lib/components/vmcps/VMcpDragHint.svelte';
 	import VMcpDragOverlay from '$lib/components/vmcps/VMcpDragOverlay.svelte';
 	import VMcpGraph from '$lib/components/vmcps/VMcpGraph.svelte';
@@ -70,9 +69,8 @@
 	let createEditVMcp = $state<ReturnType<typeof CreateEditVMcp>>();
 	let profilesPanel = $state<ReturnType<typeof VMcpProfiles>>();
 	let catalogEntryDialog = $state<ReturnType<typeof ViewModifyCatalogEntry>>();
-	let connectVMcpDialog = $state<ReturnType<typeof ConnectVMcp>>();
 	let refreshingTester = $state(false);
-	let configurationDialog = $state<ReturnType<typeof VMcpComponentConfigurationDialog>>();
+	let vmcpActions = $state<ReturnType<typeof VMcpActions>>();
 	let rightPanelEl = $state<HTMLElement>();
 	let graphCanvasEl = $state<HTMLElement>();
 	let profilesTabEl = $state<HTMLButtonElement>();
@@ -97,10 +95,16 @@
 		profile.current.id === selectedVMcp?.userID ||
 			(!selectedVMcp?.userID && profile.current.hasAdminAccess?.())
 	);
+	let canAccessTester = $derived(Boolean(selectedVMcp?.id && (isOwner || !selectedVMcp?.userID)));
+	let canAccessProfiles = $derived(isOwner && profile.current.hasAdminAccess?.());
 	let canEdit = $derived(
 		!selectedVMcp || profile.current.isAdmin?.() || profile.current.id === selectedVMcp?.userID
 	);
-	let viewType = $derived(view !== 'graph' && !isOwner ? 'graph' : view);
+	let viewType = $derived(
+		(view === 'profiles' && !canAccessProfiles) || (view === 'tester' && !canAccessTester)
+			? 'graph'
+			: view
+	);
 	let componentDropPending = $state(false);
 	let showDesignerLoading = $derived(
 		(isVMcpCreateHandoffPending() || componentDropPending) && !toolFlow.dialog
@@ -290,7 +294,7 @@
 
 			pendingComponentDrop = { target: latest, entry, component };
 			componentDropPending = false;
-			configurationDialog?.open(entry);
+			vmcpActions?.openConfiguration(entry);
 		} catch {
 			componentDropPending = false;
 			errors.append('Failed to add MCP server to vMCP.');
@@ -335,10 +339,7 @@
 	}
 
 	function handleConnectVMcp(vmcp: VMCP, options?: VMcpConnectOptions) {
-		const vmcpInstance = vmcpInstances.current.items.find(
-			(candidate) => candidate.vmcpID === vmcp.id && candidate.userID === profile.current.id
-		);
-		connectVMcpDialog?.open(vmcp, vmcpInstance, options);
+		vmcpActions?.openConnect(vmcp, undefined, options);
 	}
 
 	async function refreshTester(vmcpID: string) {
@@ -400,7 +401,7 @@
 			</div>
 		{/if}
 
-		{#if isOwner && !responsive.isMobile}
+		{#if (isOwner || canAccessTester) && !responsive.isMobile}
 			{@render toggleSubview()}
 			<VMcpProfilesHint
 				show={showProfilesHint}
@@ -453,6 +454,13 @@
 						onEdit={canEdit ? () => createEditVMcp?.openEdit(item) : undefined}
 						onConnect={(options) => handleConnectVMcp(item, options)}
 						onDelete={canEdit ? () => createEditVMcp?.openDelete(item) : undefined}
+						openSelectInstance={vmcpActions?.openSelectInstance}
+						openDiff={vmcpActions?.openDiff}
+						openUpdateConfirm={vmcpActions?.openUpdateConfirm}
+						openEditInstanceConfiguration={vmcpActions?.openEditInstanceConfiguration}
+						onUpdate={(updated) => {
+							selectedVMcp = updated;
+						}}
 						onModifyComponent={canEdit
 							? (component) => toolFlow.openComponent(component, item)
 							: undefined}
@@ -533,7 +541,7 @@
 					setUrlParamAndUpdateUrl(page.url, 'view', 'graph');
 				}}>Designer</button
 			>
-			{#if isOwner && profile.current.hasAdminAccess?.()}
+			{#if canAccessProfiles}
 				<button
 					bind:this={profilesTabEl}
 					class={twMerge(
@@ -546,7 +554,7 @@
 					}}>Profiles</button
 				>
 			{/if}
-			{#if selectedVMcp?.id && isOwner}
+			{#if canAccessTester}
 				<button
 					class={twMerge(
 						'tab text-xs min-w-24',
@@ -565,12 +573,7 @@
 
 <VMcpToolDialogs flow={toolFlow} />
 
-<ConnectVMcp bind:this={connectVMcpDialog} />
-
-<VMcpComponentConfigurationDialog
-	bind:this={configurationDialog}
-	onNext={handleConfigurationNext}
-/>
+<VMcpActions bind:this={vmcpActions} onConfigurationNext={handleConfigurationNext} />
 
 <CreateEditVMcp
 	bind:this={createEditVMcp}

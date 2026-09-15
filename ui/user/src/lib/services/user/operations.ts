@@ -112,6 +112,13 @@ export async function createVMCP(
 	return (await doPost('/vmcps', manifest, opts)) as VMCP;
 }
 
+export async function revealVMCP(
+	id: string,
+	opts?: { fetch?: Fetcher; dontLogErrors?: boolean }
+): Promise<VMCPConfiguration> {
+	return (await doPost(`/vmcps/${id}/reveal`, {}, opts)) as VMCPConfiguration;
+}
+
 export async function updateVMCP(
 	id: string,
 	manifest: VMCPManifest,
@@ -122,6 +129,10 @@ export async function updateVMCP(
 
 export async function deleteVMCP(id: string, opts?: { fetch?: Fetcher }): Promise<void> {
 	await doDelete(`/vmcps/${id}`, opts);
+}
+
+export async function triggerVMCPUpdate(id: string, opts?: { fetch?: Fetcher }): Promise<void> {
+	await doPost(`/vmcps/${id}/trigger-update`, {}, opts);
 }
 
 export async function generateVMCPComponentToolPreviews(
@@ -166,7 +177,7 @@ export async function listVMCPInstances(opts?: {
 
 export async function getVMCPInstance(
 	id: string,
-	opts?: { fetch?: Fetcher }
+	opts?: { fetch?: Fetcher; dontLogErrors?: boolean }
 ): Promise<VMCPInstance> {
 	return (await doGet(`/vmcp-instances/${id}`, opts)) as VMCPInstance;
 }

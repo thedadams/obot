@@ -1,18 +1,14 @@
 <script lang="ts">
 	import { tooltip } from '$lib/actions/tooltip.svelte';
-	import { toInlineHTMLFromMarkdown } from '$lib/markdown';
 	import type { OrgUser, VMCP } from '$lib/services';
 	import type { VMcpComponentView, VMcpConnectOptions } from '$lib/services/vmcps/types';
-	import { vmcpConnectURL } from '$lib/services/vmcps/utils';
 	import { profile } from '$lib/stores';
 	import { getUserDisplayName } from '$lib/utils';
 	import McpServerIcon from './McpServerIcon.svelte';
+	import VMcpActions from './VMcpActions.svelte';
 	import VMcpCard from './VMcpCard.svelte';
 	import VMcpIcon from './VMcpIcon.svelte';
 	import type { Snippet } from 'svelte';
-
-	const CARD_STAGGER_MS = 30;
-	const CARD_STAGGER_MAX_STEPS = 8;
 
 	interface Props {
 		items: VMCP[];
@@ -20,32 +16,34 @@
 		onSelect?: (vmcp: VMCP) => void;
 		onConnect?: (vmcp: VMCP, options?: VMcpConnectOptions) => void;
 		onDelete?: (vmcp: VMCP) => void;
+		onUpdate?: (vmcp: VMCP) => void;
 		noDataContent?: Snippet;
 		usersMap: Map<string, OrgUser>;
 	}
 
-	let { items, components, onSelect, onConnect, onDelete, noDataContent, usersMap }: Props =
-		$props();
+	let {
+		items,
+		components,
+		onSelect,
+		onConnect,
+		onDelete,
+		onUpdate,
+		noDataContent,
+		usersMap
+	}: Props = $props();
 
 	let cards = $derived(items.map(toCard));
 	let overflowHiddenById = $state<Record<string, number>>({});
+	let vmcpActions = $state<ReturnType<typeof VMcpActions>>();
 
 	type VMcpListCard = ReturnType<typeof toCard>;
 
 	function toCard(item: VMCP) {
-		const componentServers = components(item);
 		return {
 			id: item.id,
-			name: item.displayName || 'Untitled vMCP',
-			connected: false,
-			componentServers,
-			descriptionHTML: toInlineHTMLFromMarkdown(item.description ?? ''),
-			data: item
+			componentServers: components(item),
+			vmcp: item
 		};
-	}
-
-	function cardDelay(index: number) {
-		return Math.min(index, CARD_STAGGER_MAX_STEPS) * CARD_STAGGER_MS;
 	}
 
 	function setOverflowHidden(cardId: string, hidden: number) {
@@ -155,29 +153,32 @@
 		</div>
 	{:else}
 		<div class="grid grid-cols-1 items-start gap-4 @2xl:grid-cols-2 @5xl:grid-cols-3">
-			{#each cards as card, index (card.id)}
-				{@render vmcpCard(card, index)}
+			{#each cards as card (card.id)}
+				{@render vmcpCard(card)}
 			{/each}
 		</div>
 	{/if}
 </div>
 
-{#snippet vmcpCard(card: VMcpListCard, index: number)}
+<VMcpActions bind:this={vmcpActions} />
+
+{#snippet vmcpCard(card: VMcpListCard)}
 	<VMcpCard
-		id={card.id}
-		name={card.name}
-		descriptionHTML={card.data.description ? card.descriptionHTML : undefined}
-		connectURL={vmcpConnectURL(card.data)}
-		connectButtonId={`btn-connect-to-server-${card.id}`}
-		connected={card.connected}
-		selectAriaLabel={`Open ${card.name}`}
-		enterDelay={cardDelay(index)}
-		onSelect={() => onSelect?.(card.data)}
-		onConnect={(options) => onConnect?.(card.data, options)}
-		onDelete={() => onDelete?.(card.data)}
+		vmcp={card.vmcp}
+		selectAriaLabel={`Open ${card.vmcp.displayName || 'Untitled vMCP'}`}
+		onSelect={() => onSelect?.(card.vmcp)}
+		onConnect={(options) =>
+			onConnect
+				? onConnect(card.vmcp, options)
+				: vmcpActions?.openConnect(card.vmcp, undefined, options)}
+		onDelete={() => onDelete?.(card.vmcp)}
+		{onUpdate}
+		openSelectInstance={vmcpActions?.openSelectInstance}
+		openDiff={vmcpActions?.openDiff}
+		openUpdateConfirm={vmcpActions?.openUpdateConfirm}
+		openEditInstanceConfiguration={vmcpActions?.openEditInstanceConfiguration}
 		class="h-full text-base-content border-base-300 dark:border-base-400 bg-base-100 dark:bg-base-300 group @container cursor-pointer gap-3 rounded-lg border p-3 shadow-xs transition-[transform,box-shadow,border-color] duration-150 hover:border-primary hover:shadow-md"
-		userID={card.data.userID}
-		note={getNote(card.data)}
+		note={getNote(card.vmcp)}
 	>
 		{#snippet icon()}
 			<VMcpIcon components={card.componentServers} />

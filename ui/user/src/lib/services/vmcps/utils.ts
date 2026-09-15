@@ -2,10 +2,11 @@ import { DEFAULT_MCP_CATALOG_ID } from '$lib/constants';
 import type {
 	MCPCatalogEntry,
 	MCPCatalogServer,
+	VMCPComponent,
 	MCPConfig,
 	OrgUser,
 	VMCP,
-	VMCPComponent,
+	VMCPInstance,
 	VMCPManifest,
 	VMCPProfile
 } from '$lib/services';
@@ -67,6 +68,93 @@ export const initVMcp = (): VMcpFormData => ({
 	description: ''
 });
 
+export function vmcpNeedsUpdate(vmcp: VMCP) {
+	return vmcp.status?.components?.some((component) => component.needsUpdate) ?? false;
+}
+
+export function vmcpHasUserAllowedConfiguration(vmcp: VMCP) {
+	return Boolean(
+		vmcp.components?.some((component) =>
+			component.configuration?.some((field) => field.policy === 'userAllowed')
+		)
+	);
+}
+
+export function vmcpInstanceNeedsUserConfiguration(instance?: VMCPInstance) {
+	return Boolean(instance?.status?.missingRequiredConfiguration?.length);
+}
+
+export function vmcpOutdatedComponents(vmcp: VMCP): VMCPComponent[] {
+	const statuses = vmcp.status?.components ?? [];
+	return (vmcp.components ?? []).filter((component) =>
+		statuses.some((status) => status.name === component.name && status.needsUpdate)
+	);
+}
+
+export function vmcpUpdateConfigurationTargets(
+	vmcp: VMCP,
+	entries: MCPCatalogEntry[]
+): { component: VMCPComponent; entry: MCPCatalogEntry }[] {
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	return vmcpOutdatedComponents(vmcp).flatMap((component) => {
+		const entry = byId.get(component.mcpServerCatalogEntryID);
+		if (!entry || catalogConfigurationFields(entry).length === 0) return [];
+		return [{ component, entry }];
+	});
+}
+
+export function configurationWithRevealedValues(
+	configuration: VMCPComponent['configuration'],
+	revealed: Record<string, string> | undefined
+): VMCPComponent['configuration'] {
+	if (!configuration || !revealed) return configuration;
+	return configuration.map((policy) => {
+		if (policy.policy !== 'fixed') return policy;
+		const value = revealed[policy.key];
+		return value ? { ...policy, value } : policy;
+	});
+}
+
+/**
+ * Ordinary VMCP updates keep the stored catalog snapshot, so required keys that
+ * the latest catalog no longer lists must still be sent. Values are omitted so
+ * redacted secrets are not written back.
+ */
+export function configurationForSnapshotUpdate(
+	component: VMCPComponent,
+	next: NonNullable<VMCPComponent['configuration']>
+): NonNullable<VMCPComponent['configuration']> {
+	const nextKeys = new Set(next.map((policy) => policy.key));
+	const snapshotFields = catalogConfigurationFields(component.catalogEntry);
+	const retained = (component.configuration ?? []).flatMap((policy) => {
+		if (nextKeys.has(policy.key)) return [];
+		const field = snapshotFields.find((candidate) => candidate.key === policy.key);
+		if (!field?.required || field.value || field.secretBinding) return [];
+		return [{ key: policy.key, policy: policy.policy }];
+	});
+	return retained.length === 0 ? next : [...next, ...retained];
+}
+
+export function vmcpComponentDiffServers(
+	component: VMCPComponent,
+	updatedEntry?: MCPCatalogEntry
+): {
+	fromServer?: MCPCatalogServer;
+	toServer?: MCPCatalogEntry;
+} {
+	if (!updatedEntry) {
+		return {};
+	}
+
+	return {
+		fromServer: {
+			id: component.mcpServerCatalogEntryID,
+			manifest: component.catalogEntry.manifest
+		} as MCPCatalogServer,
+		toServer: updatedEntry
+	};
+}
+
 export function vmcpConnectURL(vmcp: VMCP) {
 	const link = vmcp.links?.connectURL || vmcp.links?.['mcp-connect'];
 	if (link) return link;
@@ -99,7 +187,9 @@ export function catalogEntryToVMCPComponent(entry: MCPCatalogEntry): VMCPCompone
 	};
 }
 
-export function catalogConfigurationFields(entry: MCPCatalogEntry): MCPConfig[] {
+export function catalogConfigurationFields(entry: {
+	manifest: MCPCatalogEntry['manifest'];
+}): MCPConfig[] {
 	if (entry.manifest.config?.length) {
 		return entry.manifest.config;
 	}
@@ -178,11 +268,12 @@ function sortFilterOptions(options: VMcpFilterOption[]) {
 }
 
 function matchesOwnerQuery(vmcp: VMCP, query: string, owners: Map<string, OrgUser>) {
-	const owner = vmcp.userID && owners.get(vmcp.userID);
+	if (!vmcp.userID) return false;
+	const owner = owners.get(vmcp.userID);
 	if (!owner) return false;
 	return (
-		owner.username.toLowerCase().includes(query) ||
-		owner.email.toLowerCase().includes(query) ||
+		owner.username?.toLowerCase().includes(query) ||
+		owner.email?.toLowerCase().includes(query) ||
 		Boolean(owner.displayName?.toLowerCase().includes(query))
 	);
 }
