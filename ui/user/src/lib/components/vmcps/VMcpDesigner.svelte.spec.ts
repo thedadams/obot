@@ -826,9 +826,8 @@ describe('VMcpDesigner.svelte', () => {
 			const connect = page.getByRole('button', { name: 'Connect', exact: true });
 			await expect.element(connect).toBeVisible();
 			await expect.element(connect).toBeEnabled();
-			await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
 			await expect
-				.element(page.getByRole('button', { name: 'Delete', exact: true }))
+				.element(page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }))
 				.not.toBeInTheDocument();
 		});
 
@@ -1015,14 +1014,8 @@ describe('VMcpDesigner.svelte', () => {
 				.element(page.getByRole('button', { name: 'Modify Tools' }))
 				.not.toBeInTheDocument();
 
-			await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
-			await expect.element(page.getByRole('link', { name: 'View Audit Logs' })).toBeVisible();
-			await expect.element(page.getByRole('link', { name: 'View Usage' })).toBeVisible();
 			await expect
-				.element(page.getByRole('button', { name: 'Edit Details', exact: true }))
-				.not.toBeInTheDocument();
-			await expect
-				.element(page.getByRole('button', { name: 'Delete', exact: true }))
+				.element(page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }))
 				.not.toBeInTheDocument();
 		});
 
@@ -1221,6 +1214,64 @@ describe('VMcpDesigner.svelte', () => {
 				.element(page.getByText('This will begin the initial setup process for this server.'))
 				.toBeVisible();
 			await expect.element(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+		});
+
+		it('opens edit configuration from the tester when the instance is not configured', async () => {
+			const vmcp = createIssueTrackerVMcp();
+			const latest = createIssueTrackerVMcp();
+			const config = [
+				{
+					key: 'API_TOKEN',
+					name: 'API token',
+					description: 'Token',
+					required: true,
+					sensitive: true,
+					value: '',
+					usage: 'env' as const
+				}
+			];
+			latest.components![0].configuration = [{ key: 'API_TOKEN', policy: 'userAllowed' }];
+			latest.components![0].catalogEntry = {
+				...latest.components![0].catalogEntry,
+				manifest: {
+					...latest.components![0].catalogEntry!.manifest,
+					config
+				}
+			};
+			const instance: VMCPInstance = {
+				id: 'vmcpi-unconfigured',
+				vmcpID: vmcp.id,
+				userID: getProfileResponse.id,
+				created: vmcp.created,
+				status: {
+					configured: false,
+					missingRequiredConfiguration: [`${latest.components![0].id}.API_TOKEN`]
+				}
+			};
+			const getVMcp = vi.fn();
+			worker.use(
+				http.get(`/api/vmcps/${vmcp.id}`, () => {
+					getVMcp();
+					return HttpResponse.json(latest);
+				}),
+				http.post(`/api/vmcp-instances/${instance.id}/reveal`, () =>
+					HttpResponse.json({
+						components: { [latest.components![0].id!]: { API_TOKEN: '' } }
+					})
+				)
+			);
+			appPage.url.searchParams.set('view', 'inspector');
+
+			await renderDesigner([componentEntry], vmcp, { instances: [instance] });
+
+			await expect
+				.element(
+					page.getByText('Before you can continue inspecting this vMCP, an update is required.')
+				)
+				.toBeVisible();
+			await page.getByRole('button', { name: 'Update Configuration' }).click();
+			await expect.element(page.getByCSS('input[name="API token"]')).toBeVisible();
+			await vi.waitFor(() => expect(getVMcp).toHaveBeenCalledOnce());
 		});
 	});
 
