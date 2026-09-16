@@ -111,6 +111,8 @@
 	let setupSignInDialog = $state<ReturnType<typeof ResponsiveDialog>>();
 	let explicitOwners = $state<string[]>([]);
 	let setupTempLoginUrl = $state('');
+	let setupLocalUserEmail = $state<string>();
+	let isLocalSetup = $derived(configuringAuthProvider?.id === CommonAuthProviderIds.LOCAL);
 
 	let loading = $state(false);
 	let configureError = $state<string>();
@@ -142,11 +144,15 @@
 		if (configuredAuthProvider.id === CommonAuthProviderIds.LOCAL) {
 			const localUsers = await AdminService.listLocalAuthUsers();
 			if (localUsers.length === 0) return;
+
+			setupLocalUserEmail = localUsers.length === 1 ? localUsers[0].email : undefined;
+		} else {
+			setupLocalUserEmail = undefined;
 		}
 
 		if (!setupLoading && !setupTempLoginUrl) {
 			configuringAuthProvider = configuredAuthProvider;
-			handleOwnerSetup();
+			await handleOwnerSetup();
 		}
 	};
 
@@ -230,16 +236,19 @@
 
 		try {
 			explicitOwners = (await AdminService.listExplicitRoleEmails())?.owners ?? [];
+
 			setupTempLoginUrl = (
 				await AdminService.initiateTempLogin(
 					configuringAuthProvider.id,
 					configuringAuthProvider.namespace
 				)
 			).redirectUrl;
-			setupLoading = false;
+
 			setupSignInDialog?.open();
-		} catch (_) {
-			// ignore
+		} catch (err) {
+			errors.append(err);
+		} finally {
+			setupLoading = false;
 		}
 	}
 
@@ -422,11 +431,20 @@
 		// A staged Local provider is past the step its own dialog covers, so resuming goes to the
 		// sign-in that proves it rather than back to editing users.
 		if (authProvider.id === CommonAuthProviderIds.LOCAL && !authProvider.staged) {
+			setupTempLoginUrl = '';
 			localAuthConfigureOpen = true;
 			localAuthConfigure?.open();
 		} else {
 			providerConfigure?.open();
 		}
+	}
+
+	function handleManageLocalUsers() {
+		const local = authProviders.find((provider) => provider.id === CommonAuthProviderIds.LOCAL);
+		if (!local) return;
+
+		setupSignInDialog?.close();
+		handleClickConfigure(local);
 	}
 
 	// Local's first step lives in its own dialog, so going back from the sign-in step has to hand
@@ -660,6 +678,7 @@
 	values={configuringAuthProviderValues}
 	readonly={profile.current.isAdminReadonly?.()}
 	onConfigure={handleLocalAuthConfigure}
+	bootstrap={isBootstrapUser}
 	onClose={handleLocalAuthClose}
 	switching={atLeastOneConfigured && activeProvider?.id !== CommonAuthProviderIds.LOCAL}
 >
@@ -696,7 +715,16 @@
 	{/snippet}
 
 	<div class="flex flex-col gap-4">
-		{#if explicitOwners.length > 0}
+		{#if isLocalSetup}
+			<p>
+				{#if setupLocalUserEmail}
+					Finish setting up Obot by signing in as <b>{setupLocalUserEmail}</b>.
+				{:else}
+					Finish setting up Obot by signing in with one of your local accounts.
+				{/if}
+			</p>
+			<p>That account then becomes the <b>owner</b> of this Obot installation.</p>
+		{:else if explicitOwners.length > 0}
 			<p>You'll need to continue setup with an owner account.</p>
 			<p>The following user(s) have been explicitly assigned the Owner role:</p>
 			<ul class="list-disc px-8">
@@ -727,11 +755,23 @@
 						src={configuringAuthProvider.icon}
 						alt={configuringAuthProvider.name}
 					/>
-					<span class="text-center text-sm font-light">
-						Continue with {configuringAuthProvider.name}
-					</span>
 				{/if}
+				<span class="text-center text-sm font-light">
+					{#if isLocalSetup && setupLocalUserEmail}
+						Sign in as {setupLocalUserEmail}
+					{:else}
+						Continue with {configuringAuthProvider?.name}
+					{/if}
+				</span>
 			</a>
+			{#if isLocalSetup}
+				<p class="text-muted-content text-center text-xs font-light">
+					Forgot the password?
+					<button type="button" class="text-link underline" onclick={handleManageLocalUsers}>
+						Manage local accounts
+					</button>
+				</p>
+			{/if}
 		</div>
 	</div>
 </ResponsiveDialog>
