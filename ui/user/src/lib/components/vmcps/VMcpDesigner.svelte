@@ -6,26 +6,26 @@
 	import CreateVMcpButton from '$lib/components/vmcps/CreateVMcpButton.svelte';
 	import McpServersSidebar from '$lib/components/vmcps/McpServersSidebar.svelte';
 	import VMcpActions from '$lib/components/vmcps/VMcpActions.svelte';
-	import VMcpDragHint from '$lib/components/vmcps/VMcpDragHint.svelte';
+	import VMcpCreationHint from '$lib/components/vmcps/VMcpCreationHint.svelte';
 	import VMcpDragOverlay from '$lib/components/vmcps/VMcpDragOverlay.svelte';
 	import VMcpGraph from '$lib/components/vmcps/VMcpGraph.svelte';
 	import VMcpGraphRow from '$lib/components/vmcps/VMcpGraphRow.svelte';
+	import VMcpIntroduction from '$lib/components/vmcps/VMcpIntroduction.svelte';
 	import VMcpProfiles from '$lib/components/vmcps/VMcpProfiles.svelte';
-	import VMcpProfilesHint from '$lib/components/vmcps/VMcpProfilesHint.svelte';
 	import VMcpTester from '$lib/components/vmcps/VMcpTester.svelte';
 	import VMcpToolDialogs from '$lib/components/vmcps/VMcpToolDialogs.svelte';
 	import ViewModifyCatalogEntry from '$lib/components/vmcps/ViewModifyCatalogEntry.svelte';
 	import Loading from '$lib/icons/Loading.svelte';
 	import { CREATE_VMCP_DROP_ID, createEntryDrag } from '$lib/runes/vmcps/entryDrag.svelte';
 	import {
-		claimProfilesHintForVMcp,
+		claimCreationHintForVMcp,
 		claimToolSetupForVMcp,
 		createVMcpToolFlow,
 		finishVMcpCreateHandoff,
 		isVMcpCreateHandoffPending,
-		markVMcpProfilesHintSeen,
+		markVMcpCreationHintSeen,
 		peekQueuedToolSetupVMcp,
-		queueProfilesHintForCreatedVMcp,
+		queueCreationHintForCreatedVMcp,
 		queueToolSetupForCreatedVMcp
 	} from '$lib/runes/vmcps/vmcpToolFlow.svelte';
 	import {
@@ -58,24 +58,27 @@
 		vmcp?: VMCP;
 		onBack?: () => void;
 		usersMap: Map<string, OrgUser>;
+		isFirstVMcp?: boolean;
+		showBackButton?: boolean;
 	}
 
-	let { vmcp, onBack, usersMap }: Props = $props();
+	let { vmcp, onBack, usersMap, isFirstVMcp = false, showBackButton = true }: Props = $props();
 
 	let view = $derived(
-		(page.url.searchParams.get('view') as 'graph' | 'profiles' | 'tester' | undefined) ?? 'graph'
+		(page.url.searchParams.get('view') as 'graph' | 'profiles' | 'inspector' | undefined) ?? 'graph'
 	);
 	let showRightPanel = $state(responsive.isMobile ? false : true);
 	let createEditVMcp = $state<ReturnType<typeof CreateEditVMcp>>();
 	let profilesPanel = $state<ReturnType<typeof VMcpProfiles>>();
 	let catalogEntryDialog = $state<ReturnType<typeof ViewModifyCatalogEntry>>();
 	let refreshingTester = $state(false);
-	let connectingTesterID = $state<string>();
 	let vmcpActions = $state<ReturnType<typeof VMcpActions>>();
 	let rightPanelEl = $state<HTMLElement>();
 	let graphCanvasEl = $state<HTMLElement>();
 	let profilesTabEl = $state<HTMLButtonElement>();
-	let profilesHintQueued = $state(false);
+	let testerTabEl = $state<HTMLButtonElement>();
+	let connectButtonEl = $state<HTMLElement>();
+	let creationHintQueued = $state(false);
 	let rightPanelWidth = $state(0);
 	let pendingEntryDrop = $state<{ vmcp?: VMCP }>();
 	let pendingComponentDrop = $state<{
@@ -98,11 +101,12 @@
 	);
 	let canAccessTester = $derived(Boolean(selectedVMcp?.id && (isOwner || !selectedVMcp?.userID)));
 	let canAccessProfiles = $derived(isOwner && profile.current.hasAdminAccess?.());
+	let hasEntries = $derived(mcpServersAndEntries.current.entries.length > 0);
 	let canEdit = $derived(
 		!selectedVMcp || profile.current.isAdmin?.() || profile.current.id === selectedVMcp?.userID
 	);
 	let viewType = $derived(
-		(view === 'profiles' && !canAccessProfiles) || (view === 'tester' && !canAccessTester)
+		(view === 'profiles' && !canAccessProfiles) || (view === 'inspector' && !canAccessTester)
 			? 'graph'
 			: view
 	);
@@ -148,14 +152,14 @@
 		if (!created || !isOwner || !canEdit) return;
 
 		untrack(() => {
-			if (claimProfilesHintForVMcp(created.id)) {
-				profilesHintQueued = true;
+			if (claimCreationHintForVMcp(created.id)) {
+				creationHintQueued = true;
 			}
 		});
 	});
 
-	let showProfilesHint = $derived(
-		profilesHintQueued && !toolFlow.dialog && viewType === 'graph' && isOwner && canEdit
+	let showCreationHint = $derived(
+		creationHintQueued && !toolFlow.dialog && viewType === 'graph' && isOwner && canEdit
 	);
 
 	function componentManifestField(component: VMCPComponent, field: 'name' | 'shortDescription') {
@@ -326,13 +330,13 @@
 
 	function handleVMcpCreated(created: VMCP) {
 		queueToolSetupForCreatedVMcp(created.id);
-		queueProfilesHintForCreatedVMcp(created.id);
+		if (isFirstVMcp) queueCreationHintForCreatedVMcp(created.id);
 		goto(`/vmcps/${created.id}`);
 	}
 
-	function dismissProfilesHint() {
-		profilesHintQueued = false;
-		markVMcpProfilesHintSeen();
+	function dismissCreationHint() {
+		creationHintQueued = false;
+		markVMcpCreationHintSeen();
 	}
 
 	function vmcpComponents(target: VMCP) {
@@ -385,7 +389,7 @@
 		collapsedSidebarHeaderContent: 'p-4 pb-0'
 	}}
 	{title}
-	showBackButton
+	{showBackButton}
 	onBackButtonClick={handleBack}
 >
 	<div
@@ -404,10 +408,15 @@
 
 		{#if (isOwner || canAccessTester) && !responsive.isMobile}
 			{@render toggleSubview()}
-			<VMcpProfilesHint
-				show={showProfilesHint}
-				anchorEl={profilesTabEl}
-				onDismiss={dismissProfilesHint}
+			<VMcpCreationHint
+				show={showCreationHint}
+				profilesAnchorEl={profilesTabEl}
+				testerAnchorEl={testerTabEl}
+				connectAnchorEl={connectButtonEl}
+				includeProfiles={Boolean(profile.current.hasAdminAccess?.())}
+				includeTester={Boolean(selectedVMcp?.id)}
+				includeConnect={Boolean(selectedVMcp)}
+				onDismiss={dismissCreationHint}
 			/>
 		{/if}
 		{#if viewType === 'profiles'}
@@ -420,21 +429,22 @@
 				}}
 				readonly={!canEdit}
 			/>
-		{:else if viewType === 'tester'}
+		{:else if viewType === 'inspector'}
 			{#if selectedVMcp}
 				<div class="flex h-full min-h-0 flex-col p-3 pt-14">
 					<VMcpTester
 						vmcp={selectedVMcp}
-						loading={refreshingTester || connectingTesterID === selectedVMcp.id}
+						loading={refreshingTester}
 						onLaunch={() => {
 							if (!selectedVMcp) return;
 							const vmcpID = selectedVMcp.id;
+							refreshingTester = true;
 							handleConnectVMcp(selectedVMcp, {
-								onConnectingChange: (connecting) => {
-									connectingTesterID = connecting ? vmcpID : undefined;
-								},
 								onConnected: () => {
 									void refreshTester(vmcpID);
+								},
+								onDismissed: () => {
+									refreshingTester = false;
 								}
 							});
 						}}
@@ -468,6 +478,7 @@
 						onModifyComponent={canEdit
 							? (component) => toolFlow.openComponent(component, item)
 							: undefined}
+						bind:connectEl={connectButtonEl}
 						{usersMap}
 					/>
 				{/snippet}
@@ -499,12 +510,6 @@
 					{/if}
 				{/snippet}
 			</VMcpGraph>
-			{#if showRightPanel && canEdit && !responsive.isMobile}
-				<VMcpDragHint
-					dragActive={entryDrag.active}
-					class="absolute top-1/2 right-4 z-20 hidden -translate-y-1/2 @2xl:block"
-				/>
-			{/if}
 		{/if}
 	</div>
 	{#if responsive.isMobile && !showRightPanel && viewType === 'graph'}
@@ -520,7 +525,7 @@
 		</div>
 	{/if}
 	{#snippet rightSidebar()}
-		{#if canEdit && viewType === 'graph' && (!responsive.isMobile || (responsive.isMobile && showRightPanel))}
+		{#if canEdit && viewType === 'graph' && (!responsive.isMobile || (responsive.isMobile && showRightPanel && (canCreateCatalogEntry || hasEntries)))}
 			<McpServersSidebar
 				bind:panelEl={rightPanelEl}
 				bind:open={showRightPanel}
@@ -553,20 +558,20 @@
 						viewType === 'profiles' && 'tab-active bg-base-300 dark:bg-base-100'
 					)}
 					onclick={() => {
-						dismissProfilesHint();
 						setUrlParamAndUpdateUrl(page.url, 'view', 'profiles');
 					}}>Profiles</button
 				>
 			{/if}
 			{#if canAccessTester}
 				<button
+					bind:this={testerTabEl}
 					class={twMerge(
 						'tab text-xs min-w-24',
-						viewType === 'tester' && 'tab-active bg-base-300 dark:bg-base-100'
+						viewType === 'inspector' && 'tab-active bg-base-300 dark:bg-base-100'
 					)}
 					onclick={() => {
-						setUrlParamAndUpdateUrl(page.url, 'view', 'tester');
-					}}>Tester</button
+						setUrlParamAndUpdateUrl(page.url, 'view', 'inspector');
+					}}>Inspector</button
 				>
 			{/if}
 		</div>
@@ -596,6 +601,8 @@
 	addToVMcpLabel={selectedVMcp ? 'Add to vMCP' : 'Create vMCP'}
 	isAddedToVMcp={isAddedToSelectedVMcp}
 />
+
+<VMcpIntroduction show={isFirstVMcp && !selectedVMcp && canEdit && viewType === 'graph'} />
 
 <svelte:head>
 	<title>Obot | {title}</title>

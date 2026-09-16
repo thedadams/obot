@@ -9,7 +9,7 @@
 	import VMcpList from '$lib/components/vmcps/VMcpList.svelte';
 	import VMcpListSettings from '$lib/components/vmcps/VMcpListSettings.svelte';
 	import Loading from '$lib/icons/Loading.svelte';
-	import { UserService, type OrgUser, type VMCP } from '$lib/services';
+	import { Group, UserService, type OrgUser, type VMCP } from '$lib/services';
 	import { COMMON_AI_CLIENTS } from '$lib/services/user/constants';
 	import type { VMcpSortBy } from '$lib/services/vmcps/types';
 	import {
@@ -18,7 +18,7 @@
 		sortVMcps,
 		resolveVMcpComponents
 	} from '$lib/services/vmcps/utils';
-	import { profile, responsive } from '$lib/stores';
+	import { mcpServersAndEntries, profile, responsive } from '$lib/stores';
 	import { goto } from '$lib/url';
 	import { Layers, Plus } from '@lucide/svelte';
 	import { onMount, untrack } from 'svelte';
@@ -47,6 +47,8 @@
 		}
 		return listedVMcps;
 	});
+	let isAtLeastPoweruser = $derived(profile.current.groups.includes(Group.POWERUSER));
+
 	function componentFilterLabel(id: string) {
 		for (const vmcp of listedVMcps) {
 			const component = vmcp.components?.find(
@@ -116,7 +118,11 @@
 </script>
 
 {#if creating}
-	<VMcpDesigner onBack={hideCreate} {usersMap} />
+	<VMcpDesigner
+		onBack={hideCreate}
+		{usersMap}
+		isFirstVMcp={!listedVMcps.some((vmcp) => vmcp.creatorUserID === profile.current.id)}
+	/>
 {:else}
 	<TabLayout
 		title="vMCPs"
@@ -150,9 +156,11 @@
 			{/each}
 		</div>
 	{/if}
-	<button class="btn btn-primary" onclick={openCreate}>
-		<Plus class="size-4" /> Create vMCP
-	</button>
+	{#if !isAtLeastPoweruser && mcpServersAndEntries.current.entries.length > 0}
+		<button class="btn btn-primary" onclick={openCreate}>
+			<Plus class="size-4" /> Create vMCP
+		</button>
+	{/if}
 {/snippet}
 
 {#snippet vmcpsView()}

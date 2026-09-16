@@ -19,13 +19,13 @@
 <script lang="ts">
 	import Confirm from '$lib/components/Confirm.svelte';
 	import Select from '$lib/components/Select.svelte';
-	import { resolveSubjects } from '$lib/components/admin/subjectResolver';
 	import VMcpProfileToolsOverride from '$lib/components/vmcps/VMcpProfileToolsOverride.svelte';
 	import type { VMcpToolFlow } from '$lib/runes/vmcps/vmcpToolFlow.svelte';
 	import { UserService, type OrgUser, type VMCP, type VMCPComponent } from '$lib/services';
 	import { compositeEffectiveToolNames, duplicateToolNames } from '$lib/services/user/mcp';
 	import { vmcpManifest } from '$lib/services/vmcps/utils';
 	import { success } from '$lib/stores/success';
+	import { resolveSubjects } from '$lib/subjectResolver';
 	import { getUserRoleLabel } from '$lib/utils';
 	import IconButton from '../primitives/IconButton.svelte';
 	import McpServerIcon from './McpServerIcon.svelte';
@@ -787,20 +787,25 @@
 											{/if}
 										</span>
 									</button>
+								{:else if resource}
+									<button
+										type="button"
+										class="hover:bg-base-200 dark:hover:bg-base-200/60 flex w-full items-center gap-3 py-1 pl-3 pr-1 text-left disabled:cursor-not-allowed disabled:opacity-50"
+										aria-label="Refine tools"
+										onclick={(event) => refineTools(event, component)}
+										disabled={readonly}
+									>
+										{@render componentIdentity()}
+										<span
+											class="text-muted-content flex size-8 shrink-0 items-center justify-center"
+											aria-hidden="true"
+										>
+											<Split class="size-4" />
+										</span>
+									</button>
 								{:else}
 									<div class="flex items-center gap-3 py-1 pl-3 pr-1">
 										{@render componentIdentity()}
-										{#if resource}
-											<IconButton
-												class="size-8"
-												type="button"
-												tooltip={{ text: 'Refine tools' }}
-												onclick={(event) => refineTools(event, component)}
-												disabled={readonly}
-											>
-												<Split class="size-4" />
-											</IconButton>
-										{/if}
 									</div>
 								{/if}
 								{#if resource && resource.toolOverrides.length > 0 && expanded[id]}

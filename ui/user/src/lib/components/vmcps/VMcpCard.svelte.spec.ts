@@ -201,7 +201,7 @@ describe('VMcpCard.svelte', () => {
 		await expectDeleteVisible(deleteVisible);
 	});
 
-	it('shows disconnect when connected and deletes a single instance', async () => {
+	it('shows reset when connected and deletes a single instance', async () => {
 		const instance = createInstance('vmcpi-1');
 		const deleted = vi.fn();
 		worker.use(
@@ -217,7 +217,7 @@ describe('VMcpCard.svelte', () => {
 		});
 
 		await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
-		await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+		await page.getByRole('button', { name: 'Reset', exact: true }).click();
 		await vi.waitFor(() => {
 			expect(deleted).toHaveBeenCalledOnce();
 			expect(vmcpInstances.current.items).toEqual([]);
@@ -386,7 +386,7 @@ describe('VMcpCard.svelte', () => {
 			.not.toBeInTheDocument();
 	});
 
-	it('opens instance selection when disconnecting with multiple connections', async () => {
+	it('opens instance selection when resetting with multiple connections', async () => {
 		const instances = [createInstance('vmcpi-1'), createInstance('vmcpi-2')];
 		await renderCard({
 			groups: [Group.USER],
@@ -394,7 +394,7 @@ describe('VMcpCard.svelte', () => {
 		});
 
 		await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
-		await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+		await page.getByRole('button', { name: 'Reset', exact: true }).click();
 		await expect
 			.element(page.getByRole('heading', { name: 'Select Connection to Disconnect' }))
 			.toBeVisible();
@@ -402,7 +402,7 @@ describe('VMcpCard.svelte', () => {
 		await expect.element(page.getByText('vmcpi-2')).toBeVisible();
 	});
 
-	it('disconnects the selected instance when multiple connections exist', async () => {
+	it('resets the selected instance when multiple connections exist', async () => {
 		const deleted = vi.fn();
 		worker.use(
 			http.delete('/api/vmcp-instances/:id', ({ params }) => {
@@ -417,7 +417,7 @@ describe('VMcpCard.svelte', () => {
 		});
 
 		await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
-		await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+		await page.getByRole('button', { name: 'Reset', exact: true }).click();
 		await page.getByRole('button', { name: 'Select connection' }).nth(1).click();
 		await vi.waitFor(() => {
 			expect(deleted).toHaveBeenCalledWith('vmcpi-2');
@@ -554,13 +554,16 @@ describe('VMcpCard.svelte', () => {
 
 		await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
 		await page.getByRole('button', { name: 'Edit Configuration', exact: true }).click();
-		await page.getByRole('button', { name: 'Select connection' }).nth(1).click();
+		await expect
+			.element(page.getByRole('heading', { name: 'Select Connection to Configure' }))
+			.toBeVisible();
+		await page.getByText('vmcpi-2', { exact: true }).click();
 		await expect.element(page.getByCSS('input[name="API token"]')).toBeVisible();
 		expect(revealed).toHaveBeenCalledWith('vmcpi-2');
 		expect(revealed).not.toHaveBeenCalledWith('vmcpi-1');
 	});
 
-	it('skips instance selection when only one connection needs configuration', async () => {
+	it('shows instance selection when multiple connections exist', async () => {
 		const vmcp = createUnconfiguredVmcp();
 		const revealed = vi.fn();
 		worker.use(
@@ -583,19 +586,38 @@ describe('VMcpCard.svelte', () => {
 		await page.getByRole('button', { name: 'Edit Configuration', exact: true }).click();
 		await expect
 			.element(page.getByRole('heading', { name: 'Select Connection to Configure' }))
-			.not.toBeInTheDocument();
+			.toBeVisible();
+		await page.getByText('vmcpi-1', { exact: true }).click();
 		await expect.element(page.getByCSS('input[name="API token"]')).toBeVisible();
-		expect(revealed).toHaveBeenCalledWith('vmcpi-2');
-		expect(revealed).not.toHaveBeenCalledWith('vmcpi-1');
+		expect(revealed).toHaveBeenCalledWith('vmcpi-1');
+		expect(revealed).not.toHaveBeenCalledWith('vmcpi-2');
 	});
 
-	it('hides Edit Configuration when the instance is fully configured', async () => {
+	it('opens Edit Configuration when the instance is fully configured', async () => {
 		const vmcp = createVMCP({
 			id: 'vmcp-1',
 			displayName: 'Issue Tracker vMCP',
 			userID: getProfileResponse.id
 		});
 		vmcp.components![0].configuration = [{ key: 'API_TOKEN', policy: 'userAllowed' }];
+		vmcp.components![0].catalogEntry.manifest.config = [
+			{
+				key: 'API_TOKEN',
+				name: 'API token',
+				description: 'Token',
+				required: true,
+				sensitive: true,
+				value: '',
+				usage: 'env'
+			}
+		];
+		worker.use(
+			http.post('/api/vmcp-instances/vmcpi-1/reveal', () =>
+				HttpResponse.json({
+					components: { [vmcp.components![0].id!]: { API_TOKEN: 'saved-token' } }
+				})
+			)
+		);
 
 		await renderCard({
 			groups: [Group.USER],
@@ -605,8 +627,7 @@ describe('VMcpCard.svelte', () => {
 		});
 
 		await page.getByRole('button', { name: 'Actions for Issue Tracker vMCP' }).click();
-		await expect
-			.element(page.getByRole('button', { name: 'Edit Configuration', exact: true }))
-			.not.toBeInTheDocument();
+		await page.getByRole('button', { name: 'Edit Configuration', exact: true }).click();
+		await expect.element(page.getByCSS('input[name="API token"]')).toBeVisible();
 	});
 });
