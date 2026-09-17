@@ -22,15 +22,7 @@ import { page } from 'vitest/browser';
 
 const children = createRawSnippet(() => ({ render: () => '<div></div>' }));
 
-const sharedLinks = [
-	'/dashboard',
-	'/vmcps',
-	'/skills',
-	'/models',
-	'/audit-logs',
-	'/usage',
-	'/identity-access'
-];
+const sharedLinks = ['/vmcps', '/skills', '/models', '/audit-logs', '/usage', '/identity-access'];
 
 const adminOnlyLinks = ['/admin/enforcement-events', '/admin/platform'];
 
@@ -128,6 +120,7 @@ describe('Layout.svelte', () => {
 	it('gives all users access to shared sidebar navigation', async () => {
 		await renderLayout();
 		await expectSharedNavigation();
+		await expectNoLink('/dashboard');
 		await expectNoAdminOnlyNavigation();
 	});
 
@@ -151,6 +144,7 @@ describe('Layout.svelte', () => {
 			it('shows administrator-only navigation', async () => {
 				await renderLayout([Group.ADMIN]);
 				await expectSharedNavigation();
+				await expectLink('/dashboard');
 				await expectAdminOnlyNavigation();
 				await expectNoLink('/admin/product-analytics');
 			});
@@ -160,6 +154,7 @@ describe('Layout.svelte', () => {
 			it('does not show administrator-only navigation', async () => {
 				await renderLayout([Group.POWERUSER]);
 				await expectSharedNavigation();
+				await expectLink('/dashboard');
 				await expectLink('/mcp-servers');
 				await expectNoAdminOnlyNavigation();
 			});
@@ -169,6 +164,7 @@ describe('Layout.svelte', () => {
 			it('does not show administrator-only navigation', async () => {
 				await renderLayout([Group.POWERUSER, Group.POWERUSER_PLUS]);
 				await expectSharedNavigation();
+				await expectLink('/dashboard');
 				await expectLink('/mcp-servers');
 				await expectNoAdminOnlyNavigation();
 			});
@@ -178,6 +174,7 @@ describe('Layout.svelte', () => {
 			it('hides MCP Servers and does not show administrator-only navigation', async () => {
 				await renderLayout([Group.USER]);
 				await expectSharedNavigation();
+				await expectNoLink('/dashboard');
 				await expectNoLink('/mcp-servers');
 				await expectNoAdminOnlyNavigation();
 			});
@@ -187,6 +184,7 @@ describe('Layout.svelte', () => {
 			it('shows the administrator navigation available to auditors', async () => {
 				await renderLayout([Group.USER, Group.AUDITOR]);
 				await expectSharedNavigation();
+				await expectLink('/dashboard');
 				await expectAdminOnlyNavigation();
 				await expectNoLink('/admin/product-analytics');
 			});

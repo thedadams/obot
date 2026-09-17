@@ -1,48 +1,47 @@
 import { CommonAuthProviderIds } from '$lib/constants';
-import {
-	AdminService,
-	UserService,
-	getProfile,
-	type AuthProvider,
-	type BootstrapStatus,
-	type Profile
-} from '$lib/services';
+import { AdminService, UserService, type AuthProvider, type Profile } from '$lib/services';
 import { Group } from '$lib/services/admin/types';
 import type { PageLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 
-function getAdminRedirectPath(profile?: Profile, hasVMCPs?: boolean): string {
-	if (profile?.isBootstrapUser?.()) {
-		return '/identity-access?view=auth-providers';
+function getAdminRedirectPath(
+	profile?: Profile,
+	hasVMCPs?: boolean,
+	isSetupEnabled?: boolean
+): string {
+	if (profile?.isBootstrapUser?.() && isSetupEnabled) {
+		return '/admin/setup';
 	}
 
 	if (profile?.isOwner?.() && !hasVMCPs) {
 		return '/vmcps?new=true';
 	}
 
-	return '/dashboard';
+	const isAtLeastPoweruser =
+		profile?.groups.includes(Group.POWERUSER) || profile?.hasAdminAccess?.();
+	return isAtLeastPoweruser ? '/dashboard' : '/vmcps';
 }
 
 export const load: PageLoad = async ({ fetch, url }) => {
 	let authProviders: AuthProvider[] = [];
-	let bootstrapStatus: BootstrapStatus | undefined;
 	let profile;
 
 	try {
-		profile = await getProfile({ fetch });
+		profile = await UserService.getProfile({ fetch });
 	} catch (_err) {
-		[bootstrapStatus, authProviders] = await Promise.all([
-			UserService.getBootstrapStatus(),
-			UserService.listAuthProviders({ fetch })
-		]);
+		authProviders = await UserService.listAuthProviders({ fetch });
 	}
 
+	const bootstrapStatus = await UserService.getBootstrapStatus();
 	const showSetupHandoff = url.searchParams.get('setup') === 'complete';
 	const hasAccess =
 		profile?.groups.includes(Group.ADMIN) || profile?.groups.includes(Group.AUDITOR);
 	if (hasAccess && !showSetupHandoff) {
 		const vmcps = await AdminService.listAllVMCPs({ fetch });
-		throw redirect(307, getAdminRedirectPath(profile, vmcps.length > 0));
+		throw redirect(
+			307,
+			getAdminRedirectPath(profile, vmcps.length > 0, bootstrapStatus?.setupEnabled)
+		);
 	}
 
 	if (

@@ -4,9 +4,13 @@
 	import { tooltip } from '$lib/actions/tooltip.svelte';
 	import Menu from '$lib/components/navbar/Menu.svelte';
 	import ProfileIcon from '$lib/components/profile/ProfileIcon.svelte';
-	import { ADMIN_AGENT_DISABLED_MESSAGE, USER_AGENT_DISABLED_MESSAGE } from '$lib/constants';
+	import {
+		ADMIN_AGENT_DISABLED_MESSAGE,
+		SEEN_SPLASH_DIALOG_KEY,
+		USER_AGENT_DISABLED_MESSAGE
+	} from '$lib/constants';
 	import { reloadPage } from '$lib/navigation';
-	import { AdminService, NanobotService, UserService } from '$lib/services';
+	import { AdminService, Group, NanobotService, UserService } from '$lib/services';
 	import {
 		AiClient,
 		COMMAND_SUPPORTED_AI_CLIENTS,
@@ -117,7 +121,7 @@
 
 	async function handleBootstrapLogout() {
 		try {
-			localStorage.removeItem('seenSplashDialog');
+			localStorage.removeItem(SEEN_SPLASH_DIALOG_KEY);
 			clearProductAnalyticsConsentDeferral();
 			await AdminService.bootstrapLogout();
 			window.location.href = `/oauth2/sign_out?rd=${profile.current.isBootstrapUser?.() ? '/admin' : '/'}`;
@@ -128,7 +132,7 @@
 
 	async function handleLogout() {
 		try {
-			localStorage.removeItem('seenSplashDialog');
+			localStorage.removeItem(SEEN_SPLASH_DIALOG_KEY);
 			clearProductAnalyticsConsentDeferral();
 			window.location.href = '/oauth2/sign_out?rd=/';
 		} catch (err) {
@@ -315,7 +319,15 @@
 				{/if}
 			{/if}
 			{#if showMcpManagement && !impersonating}
-				<a href={resolve('/dashboard')} rel="external" class="dropdown-link">
+				<a
+					href={resolve(
+						profile.current.groups.includes(Group.POWERUSER) || profile.current.hasAdminAccess?.()
+							? '/dashboard'
+							: '/vmcps'
+					)}
+					rel="external"
+					class="dropdown-link"
+				>
 					<LayoutDashboard class="size-4" /> App Platform
 				</a>
 			{/if}
