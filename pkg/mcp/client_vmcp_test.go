@@ -112,7 +112,7 @@ func TestListToolsThroughSharedVMCPComponentConnection(t *testing.T) {
 	admin := &user.DefaultInfo{UID: "7", Extra: map[string][]string{"obot_groups": types.RoleAdmin.Groups()}}
 	// The caller supplies the full identity; building the config needs no user lookup.
 	sm.gatewayClient = nil
-	parent.Spec.Manifest.Profiles[0].Subjects = []types.Subject{{Type: types.SubjectTypeGroup, ID: types.GroupAdmin}}
+	parent.Spec.Manifest.Profiles[0].Subjects = []types.Subject{{Type: types.SubjectTypeObotGroup, ID: types.GroupAdmin}}
 	aggregate, err := sm.serverConfigForVMCP(t.Context(), parent, instance, admin)
 	require.NoError(t, err)
 	require.Len(t, aggregate.Components, 1)

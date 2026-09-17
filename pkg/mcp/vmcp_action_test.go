@@ -25,7 +25,7 @@ func TestServerForActionWithConnectIDResolvesVMCPWithoutWrapper(t *testing.T) {
 			Manifest: types.VMCPManifest{
 				DisplayName: "Action VMCP",
 				Profiles: []types.VMCPProfile{{
-					Subjects:    []types.Subject{{Type: types.SubjectTypeGroup, ID: types.GroupAdmin}},
+					Subjects:    []types.Subject{{Type: types.SubjectTypeObotGroup, ID: types.GroupAdmin}},
 					Permissions: types.VMCPProfilePermissions{AllowAllComponents: true},
 				}},
 				Components: []types.VMCPComponent{
