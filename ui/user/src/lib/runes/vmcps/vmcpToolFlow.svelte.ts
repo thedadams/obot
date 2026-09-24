@@ -398,19 +398,30 @@ export function createVMcpToolFlow() {
 		openSetup(vmcp, component, true);
 	}
 
-	function refreshTools() {
-		const vmcp = modifyingVMcp;
-		const component = configuringComponent;
-		if (vmcp && component) openSetup(vmcp, component, true, true);
+	function refreshTools(
+		component?: VMCPComponent,
+		vmcp?: VMCP,
+		onCollected?: (config: VMCPComponent) => void
+	) {
+		if (vmcp && onCollected && component?.catalogEntry) {
+			if (!configure(vmcp, component, true, true)) return;
+			collecting = true;
+			collectTools = onCollected;
+			dialog = 'setup';
+			return;
+		}
+		const currentVMcp = modifyingVMcp;
+		const currentComponent = configuringComponent;
+		if (currentVMcp && currentComponent) openSetup(currentVMcp, currentComponent, true, true);
 	}
 
 	async function saveEditedTools() {
 		const component = configuringComponent;
 		if (!component) {
 			close();
-			return;
+			return false;
 		}
-		await saveTools({
+		return saveTools({
 			...component,
 			toolPrefix,
 			toolOverrides: toolOverridesFromRows(tools)
@@ -423,13 +434,13 @@ export function createVMcpToolFlow() {
 			collectTools = undefined;
 			done(componentConfig);
 			close();
-			return;
+			return false;
 		}
 
 		const vmcpId = modifyingVMcp?.id;
 		if (!vmcpId) {
 			close();
-			return;
+			return false;
 		}
 
 		try {
@@ -439,11 +450,16 @@ export function createVMcpToolFlow() {
 			const index = components.findIndex((candidate) => vmcpComponentId(candidate) === id);
 			if (index < 0) {
 				close();
-				return;
+				return false;
 			}
 			const nextComponents = components.map((component, componentIndex) =>
 				componentIndex === index
-					? { ...component, ...componentConfig, id: component.id ?? componentConfig.id }
+					? {
+							...component,
+							...componentConfig,
+							toolOverrides: componentConfig.toolOverrides?.filter((tool) => !tool.removed),
+							id: component.id ?? componentConfig.id
+						}
 					: component
 			);
 			const updated = await UserService.updateVMCP(latest.id, {
@@ -455,8 +471,10 @@ export function createVMcpToolFlow() {
 				`Tools updated for ${componentConfig.catalogEntry?.manifest?.name ?? componentConfig.name ?? 'this server'} on ${updated.displayName}.`
 			);
 			onVMcpChanged?.(updated);
+			return true;
 		} catch {
 			errors.append('Failed to update tools for this vMCP.');
+			return false;
 		} finally {
 			close();
 		}

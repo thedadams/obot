@@ -24,6 +24,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { page, userEvent } from 'vitest/browser';
 
+vi.mock('$app/state', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$app/state')>();
+	const { createAppState } = await import('../../../tests/helpers/navigation.svelte');
+	return createAppState(actual);
+});
+
+vi.mock('$app/navigation', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$app/navigation')>();
+	const { applyTestGoto } = await import('../../../tests/helpers/navigation.svelte');
+	return {
+		...actual,
+		goto: (url: string | URL) => applyTestGoto(url)
+	};
+});
+
 const componentEntry = createMCPCatalogEntry({
 	id: 'entry-github',
 	name: 'GitHub',
@@ -59,6 +74,21 @@ function createIssueTrackerVMcp(overrides?: ToolOverride[]) {
 		},
 		[componentEntry]
 	);
+}
+
+function withExplicitToolGrant(vmcp: VMCP, toolNames: string[]) {
+	vmcp.profiles = [
+		{
+			name: 'Engineering',
+			subjects: [{ type: 'selector', id: '*' }],
+			vmcpPermissions: {
+				allowedComponents: {
+					[`component-${componentEntry.id}`]: { allowedTools: toolNames }
+				}
+			}
+		}
+	];
+	return vmcp;
 }
 
 async function renderDesigner(
@@ -185,6 +215,7 @@ async function pressCard(locator: ReturnType<typeof page.getByRole>, pointerId: 
 describe('VMcpDesigner.svelte', () => {
 	afterEach(() => {
 		appPage.url.searchParams.delete('view');
+		appPage.url.searchParams.delete('profile');
 		appPage.url.searchParams.delete('tab');
 		vmcpInstances.current = { items: [], loading: false };
 		finishVMcpCreateHandoff();
@@ -235,7 +266,7 @@ describe('VMcpDesigner.svelte', () => {
 			await componentBlock().click();
 			await chooseModifyTools();
 
-			await page.getByRole('switch', { name: 'Enabled' }).nth(1).click();
+			await page.getByRole('switch', { name: 'Enable Tool' }).click();
 			await page.getByRole('button', { name: 'Confirm' }).click();
 
 			await vi.waitFor(() => expect(update).toHaveBeenCalled());
@@ -260,6 +291,81 @@ describe('VMcpDesigner.svelte', () => {
 			await expect
 				.element(page.getByRole('button', { name: 'Configure Tools', exact: true }))
 				.toBeVisible();
+		});
+
+		it('confirms before saving a disabled tool that a profile explicitly allows', async () => {
+			const vmcp = withExplicitToolGrant(createIssueTrackerVMcp(toolOverrides), ['create_issue']);
+			const update = vi.fn();
+			mockUpdateVMcp(vmcp, update);
+
+			await renderDesigner([componentEntry], vmcp);
+			await componentBlock().click();
+			await chooseModifyTools();
+
+			await page.getByRole('switch', { name: 'Disable Tool' }).click();
+			await page.getByRole('button', { name: 'Confirm' }).click();
+
+			const warning = page
+				.getByRole('dialog')
+				.filter({ hasText: 'The following profile(s) will be impacted by these changes:' });
+			await expect.element(warning.getByText('Confirm Save')).toBeVisible();
+			await expect.element(warning.getByRole('cell', { name: 'Engineering' })).toBeVisible();
+			await expect.element(warning.getByRole('cell', { name: 'create_issue' })).toBeVisible();
+			expect(update).not.toHaveBeenCalled();
+
+			await warning.getByRole('button', { name: 'Save' }).click();
+			await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+			expect(componentsFrom(update.mock.calls[0][0])[0]).toMatchObject({
+				toolOverrides: [
+					{ name: 'create_issue', enabled: false },
+					{ name: 'list_issues', enabled: false }
+				]
+			});
+			await expect
+				.element(page.getByRole('dialog').filter({ hasText: 'Update existing profile(s) now?' }))
+				.not.toBeInTheDocument();
+		});
+
+		it('offers to update a profile when a refresh removes a tool that profile allows', async () => {
+			const vmcp = withExplicitToolGrant(createIssueTrackerVMcp(toolOverrides), ['create_issue']);
+			const update = vi.fn();
+			mockUpdateVMcp(vmcp, update);
+			worker.use(
+				http.post(
+					`/api/vmcps/${vmcp.id}/components/${vmcp.components[0].id}/generate-tool-previews`,
+					() =>
+						HttpResponse.json({
+							...componentEntry,
+							manifest: {
+								...componentEntry.manifest,
+								toolPreview: [
+									{ id: 'list_issues', name: 'list_issues', description: 'List issues' }
+								]
+							}
+						})
+				)
+			);
+
+			await renderDesigner([componentEntry], vmcp);
+			await componentBlock().click();
+			await chooseModifyTools();
+			await page.getByRole('button', { name: 'Refresh tools' }).click();
+
+			const editor = page
+				.getByRole('dialog')
+				.filter({ hasText: 'This tool is no longer available.' });
+			await expect.element(editor).toBeVisible();
+			await editor.getByRole('button', { name: 'Confirm' }).click();
+
+			await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+			expect(componentsFrom(update.mock.calls[0][0])[0]).toMatchObject({
+				toolOverrides: [{ name: 'list_issues', enabled: false }]
+			});
+
+			const offer = page.getByRole('dialog').filter({ hasText: 'Update existing profile(s) now?' });
+			await expect.element(offer.getByText('Update Profile(s)?')).toBeVisible();
+			await expect.element(offer.getByRole('button', { name: 'Update Profile' })).toBeVisible();
+			await expect.element(offer.getByRole('button', { name: 'Skip' })).toBeVisible();
 		});
 	});
 
@@ -344,7 +450,8 @@ describe('VMcpDesigner.svelte', () => {
 				.element(page.getByRole('heading', { name: 'Configure GitHub Tools' }))
 				.toBeVisible();
 			await expect.element(page.getByText('create_issue', { exact: true }).first()).toBeVisible();
-			await page.getByRole('switch', { name: 'Enabled' }).nth(1).click();
+			expect(preview).toHaveBeenCalledWith({ API_TOKEN: 'preview-secret' });
+			await page.getByRole('switch', { name: 'Disable Tool' }).nth(1).click();
 			await page.getByRole('button', { name: 'Confirm' }).click();
 			await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
 			expect(componentsFrom(update.mock.calls[0][0])[0]).toMatchObject({
@@ -405,8 +512,11 @@ describe('VMcpDesigner.svelte', () => {
 				.toHaveValue('userAllowed');
 
 			await page.getByRole('button', { name: 'Cancel' }).click();
-			await expect.element(page.getByRole('button', { name: 'Modify Tools' })).toBeVisible();
+			await expect
+				.element(page.getByRole('button', { name: 'Modify Tools' }))
+				.not.toBeInTheDocument();
 
+			await componentBlock().click();
 			await page.getByRole('button', { name: 'Change Configuration' }).click();
 			await page.getByRole('combobox', { name: 'API token policy' }).selectOptions('Preconfigured');
 			await page.getByCSS('#fixed-API_TOKEN').fill('secret');

@@ -822,6 +822,7 @@ export type CompositeServerToolRow = {
 	description?: string;
 	overrideDescription?: string;
 	enabled: boolean;
+	removed?: boolean;
 };
 
 // MCP filters
