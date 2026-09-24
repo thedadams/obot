@@ -32,8 +32,9 @@ var (
 )
 
 type cloneAuthAttempt struct {
-	name  string
-	token string
+	name     string
+	token    string
+	username string
 }
 
 type cloneRefAttempt struct {
@@ -48,28 +49,82 @@ type githubRepoInfo struct {
 	Size int `json:"size"` // Size in KB
 }
 
-func cloneAuthAttempts(token, fallbackToken string) []cloneAuthAttempt {
-	if token != "" {
-		return []cloneAuthAttempt{{name: "token", token: token}}
+func cloneAuthAttempts(host, token, fallbackToken string) []cloneAuthAttempt {
+	var attempts []cloneAuthAttempt
+	name := "token"
+	if token == "" {
+		attempts = append(attempts, cloneAuthAttempt{name: "anonymous"})
+		token = fallbackToken
+		name = "fallback token"
 	}
-	if fallbackToken != "" {
-		return []cloneAuthAttempt{
-			{name: "anonymous"},
-			{name: "fallback token", token: fallbackToken},
-		}
+	if token == "" {
+		return attempts
 	}
-	return []cloneAuthAttempt{{name: "anonymous"}}
+	if strings.EqualFold(host, "bitbucket.org") {
+		attempts = append(attempts,
+			cloneAuthAttempt{
+				name:     name + " (personal API token)",
+				token:    token,
+				username: "x-bitbucket-api-token-auth",
+			},
+			cloneAuthAttempt{
+				name:     name + " (repository access token)",
+				token:    token,
+				username: "x-token-auth",
+			},
+		)
+	}
+	return append(attempts, cloneAuthAttempt{
+		name:     name,
+		token:    token,
+		username: "x-access-token",
+	})
+}
+
+// NormalizeRepositoryURL validates an HTTPS Git repository URL, trims surrounding
+// whitespace, and adds the HTTPS scheme when omitted. It preserves the repository
+// path and any embedded branch so stored URLs and credential keys remain stable.
+func NormalizeRepositoryURL(repoURL string) (string, error) {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL != "" && !strings.Contains(repoURL, "://") {
+		repoURL = "https://" + repoURL
+	}
+	u, err := url.Parse(repoURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid repository URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return "", fmt.Errorf("repository URL must use HTTPS")
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("repository URL must not include credentials")
+	}
+	if !IsGitRepoURL(repoURL) {
+		return "", fmt.Errorf("repository URL does not appear to be a git repository")
+	}
+	if _, _, err := parseGitURL(repoURL); err != nil {
+		return "", err
+	}
+	return repoURL, nil
+}
+
+func isKnownGitHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "github.com", "gitlab.com", "bitbucket.org":
+		return true
+	default:
+		return false
+	}
 }
 
 // IsGitRepoURL returns true if the URL points to a git repository on a known
-// hosting platform (GitHub, GitLab) or ends with ".git".
+// hosting platform (GitHub, GitLab, Bitbucket) or ends with ".git".
 func IsGitRepoURL(repoURL string) bool {
 	u, err := url.Parse(repoURL)
 	if err != nil {
 		return false
 	}
-	switch u.Host {
-	case "github.com", "gitlab.com":
+	if isKnownGitHost(u.Host) {
 		return true
 	}
 	// Treat any HTTPS URL that contains ".git" as a path segment boundary as a git repo
@@ -91,11 +146,9 @@ func Clone(ctx context.Context, repoURL, token, ref string, maxRepoSizeMB int) (
 		return "", "", nil, err
 	}
 
-	if strings.HasPrefix(repoURL, "http://") {
-		return "", "", nil, fmt.Errorf("only HTTPS is supported for git repositories")
-	}
-	if !strings.HasPrefix(repoURL, "https://") {
-		repoURL = "https://" + repoURL
+	repoURL, err = NormalizeRepositoryURL(repoURL)
+	if err != nil {
+		return "", "", nil, err
 	}
 
 	u, err := url.Parse(repoURL)
@@ -125,7 +178,7 @@ func Clone(ctx context.Context, repoURL, token, ref string, maxRepoSizeMB int) (
 	// for the clone to start. The sizeLimitedFS below acts as a hard fallback.
 	repoPath := strings.TrimPrefix(cloneURL, "https://"+u.Host+"/")
 	repoPath = strings.TrimSuffix(repoPath, ".git")
-	switch u.Host {
+	switch strings.ToLower(u.Host) {
 	case "github.com":
 		parts := strings.SplitN(repoPath, "/", 2)
 		if len(parts) == 2 {
@@ -151,7 +204,7 @@ func Clone(ctx context.Context, repoURL, token, ref string, maxRepoSizeMB int) (
 	}
 	cleanupFn := func() { _ = os.RemoveAll(parentDir) }
 
-	attempts := cloneAuthAttempts(token, fallbackToken)
+	attempts := cloneAuthAttempts(u.Hostname(), token, fallbackToken)
 	refAttempts := cloneRefAttempts(resolvedRef, ref != "")
 	attemptErrs := make([]error, 0, len(attempts)*len(refAttempts))
 	for _, attempt := range attempts {
@@ -170,7 +223,7 @@ func Clone(ctx context.Context, repoURL, token, ref string, maxRepoSizeMB int) (
 
 			if attempt.token != "" {
 				cloneOptions.Auth = &githttp.BasicAuth{
-					Username: "x-access-token", // Accepted as a dummy username by GitHub and GitLab.
+					Username: attempt.username,
 					Password: attempt.token,
 				}
 			}
@@ -235,8 +288,8 @@ func repoSizeLimitMB(limit int) (int, error) {
 
 // parseGitURL parses a git repository URL and returns the clone URL and branch.
 // It supports subgroups (e.g. gitlab.com/group/subgroup/repo.git) by using the
-// .git suffix as the repo boundary. For GitHub and GitLab, URLs without a .git
-// suffix are also accepted for backward compatibility.
+// .git suffix as the repo boundary. For GitHub, GitLab, and Bitbucket, URLs
+// without a .git suffix are also accepted.
 // Returns (cloneURL, branch, error).
 func parseGitURL(repoURL string) (string, string, error) {
 	u, err := url.Parse(repoURL)
@@ -245,8 +298,8 @@ func parseGitURL(repoURL string) (string, string, error) {
 	}
 
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("invalid git URL format, expected <host>/org/repo")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("repository URL must include an owner and repository")
 	}
 
 	var (
@@ -273,17 +326,15 @@ func parseGitURL(repoURL string) (string, string, error) {
 	// For known git hosting platforms, support URLs without .git suffix.
 	// Subgroups without .git are not supported; use the .git suffix form instead.
 	if repoPath == "" {
-		switch u.Host {
-		case "github.com", "gitlab.com":
-			repoPath = strings.Join(parts[:2], "/") + ".git"
-			if len(parts) > 2 {
-				branch = strings.Join(parts[2:], "/")
-				if err := validateBranchName(branch); err != nil {
-					return "", "", fmt.Errorf("invalid branch name: %w", err)
-				}
-			}
-		default:
+		if !isKnownGitHost(u.Host) {
 			return "", "", fmt.Errorf("invalid git URL format, URL path must end in .git (e.g. https://%s/org/repo.git)", u.Host)
+		}
+		repoPath = strings.Join(parts[:2], "/") + ".git"
+		if len(parts) > 2 {
+			branch = strings.Join(parts[2:], "/")
+			if err := validateBranchName(branch); err != nil {
+				return "", "", fmt.Errorf("invalid branch name: %w", err)
+			}
 		}
 	}
 
