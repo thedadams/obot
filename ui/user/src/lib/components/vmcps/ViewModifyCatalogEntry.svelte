@@ -45,9 +45,6 @@
 	let viewWorkspaceId = $derived(catalogEntry?.powerUserWorkspaceID);
 	let serverScopeEntity = $derived(viewWorkspaceId ? ('workspace' as const) : ('catalog' as const));
 	let serverScopeID = $derived(viewWorkspaceId || DEFAULT_MCP_CATALOG_ID);
-	let isSourcedEntry = $derived(
-		catalogEntry && 'sourceURL' in catalogEntry && !!catalogEntry.sourceURL
-	);
 	let deprecated = $derived(isDeprecatedMCPServer(catalogEntry));
 	let catalogEntryFormType = $derived<LaunchType>(
 		catalogEntry?.manifest.runtime === 'remote' ? 'remote' : 'hosted'
@@ -228,11 +225,13 @@
 					hideTitleBarAction
 					entry={catalogEntry}
 					type={catalogEntryFormType}
-					readonly={isAdminReadonly || isSourcedEntry}
+					readonly={isAdminReadonly || Boolean(catalogEntry?.sourceURL)}
 					id={serverScopeID}
 					entity={serverScopeEntity}
 					limitViews={['overview', 'tools']}
 					isDialogView
+					onAddFromTools={onAddToVMcp ? handleAddToVMcp : undefined}
+					disableAddFromTools={alreadyAdded}
 				/>
 			{/if}
 			{#if showAddToVMcp}

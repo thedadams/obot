@@ -69,6 +69,8 @@
 		server?: MCPCatalogServer;
 		type?: LaunchServerType;
 		readonly?: boolean;
+		disableAddFromTools?: boolean;
+		onAddFromTools?: () => void;
 		onCancel?: () => void;
 		onSubmit?: (id: string, isMultiUserEntry: boolean, message?: string) => void;
 		hasExistingConfigured?: boolean;
@@ -88,6 +90,8 @@
 		entity = 'catalog',
 		type,
 		readonly,
+		disableAddFromTools,
+		onAddFromTools,
 		onCancel,
 		onSubmit,
 		hasExistingConfigured,
@@ -162,6 +166,13 @@
 	let error = $state<string>();
 	let showButtonInlineError = $state(false);
 	let showUpdateExistingDeploymentsConfirm = $state(false);
+	let showUpdateExistingVmcps = $state(false);
+	let showUpdateExistingConfirm = $derived(
+		showUpdateExistingDeploymentsConfirm || showUpdateExistingVmcps
+	);
+	let hasBothUpdateActions = $derived(
+		showUpdateExistingDeploymentsConfirm && showUpdateExistingVmcps
+	);
 	let selectedDeploymentsToView = $state<MCPCatalogServer[]>([]);
 
 	let serverInstancesLoading = $state(false);
@@ -573,6 +584,21 @@
 		}
 	}
 
+	function closeUpdateExistingConfirm() {
+		showUpdateExistingDeploymentsConfirm = false;
+		showUpdateExistingVmcps = false;
+	}
+
+	function goToUpdateDeployments() {
+		closeUpdateExistingConfirm();
+		handleSelectionChange('server-instances');
+	}
+
+	function goToUpdateVmcps() {
+		closeUpdateExistingConfirm();
+		goto(`/vmcps?components=${entry?.id}&status=needs-update`);
+	}
+
 	async function reloadConfiguredServers() {
 		if (!id || !entry || !('isCatalogEntry' in entry)) return;
 		serverInstancesLoading = true;
@@ -604,8 +630,13 @@
 					.then((response) => {
 						resolvedConfiguredServers = response.filter((s) => !s.deleted);
 						refreshToolsDisplay();
-						if (response.length > 0 && response.some((instance) => instance)) {
-							showUpdateExistingDeploymentsConfirm = true;
+
+						if (response.length > 0) {
+							const belongsToVmcps = response.filter(
+								(s) => !s.deleted && !!(s.vmcpComponentID || s.vmcpID || s.vmcpInstanceID)
+							);
+							showUpdateExistingVmcps = belongsToVmcps.length > 0;
+							showUpdateExistingDeploymentsConfirm = response.length > belongsToVmcps.length;
 						}
 					})
 					.catch(() => {});
@@ -1085,50 +1116,69 @@
 				previewOverride={previewToolsOverride}
 			>
 				{#snippet noToolsContent()}
-					<div
-						class="mt-12 flex w-lg max-w-full flex-col items-center gap-4 self-center text-center"
-					>
-						<Wrench class="text-muted-content size-24 opacity-50" />
-						{#if !entry || (entry && (readonly || server || deploymentToDisplayTools || connectOnly))}
-							<h4 class="text-muted-content text-lg font-semibold">No tools</h4>
-							<p class="text-muted-content text-sm font-light">
-								Looks like this MCP server doesn't have any tools available currently.
+					{#if onAddFromTools}
+						<div class="mt-8 paper max-w-sm self-center items-center justify-items-center">
+							<div class="rounded-full bg-primary/10 p-2 w-fit">
+								<Wrench class="text-primary size-6" />
+							</div>
+							<h4 class="text-lg font-semibold">Tool Info Unavailable</h4>
+							<p class="text-sm font-light text-center">
+								Connect to this server to get an up-to-date list of the tools.
 							</p>
-						{:else if !readonly && !connectOnly}
-							<h4 class="text-muted-content text-lg font-semibold">No tools</h4>
-							{#if !isMultiTenant}
-								<button
-									class="btn btn-primary flex items-center gap-1 text-sm"
-									onclick={handleInitTemporaryInstance}
-									disabled={saving}
-								>
-									{#if saving}
-										<Loading class="size-4" />
-									{:else}
-										Populate Tool Preview
-									{/if}
-								</button>
-							{/if}
-							{#if !error}
-								<p class="text-muted-content text-sm font-light">
-									{#if isMultiTenant}
-										Tools will populate when a server is deployed for the catalog entry.
-									{:else if type === 'remote'}
-										Click above to connect to the remote MCP server to populate capabilities and
-										tools for preview.
-									{:else}
-										Click above to set up a temporary instance that will populate capabilities and
-										tools for preview. Otherwise, tools will populate when the user first deploys a
-										server for the catalog entry.
-									{/if}
-								</p>
-							{/if}
-						{/if}
-					</div>
-					{#if error && showButtonInlineError}
-						<div class="mt-4 w-full">
-							{@render errorSnippet()}
+							<button
+								class="btn btn-primary w-full flex items-center gap-1 text-sm"
+								onclick={onAddFromTools}
+								disabled={disableAddFromTools}
+							>
+								{disableAddFromTools ? 'Already added to vMCP' : 'Add to vMCP'}
+							</button>
 						</div>
+					{:else}
+						<div
+							class="mt-12 flex w-lg max-w-full flex-col items-center gap-4 self-center text-center"
+						>
+							<Wrench class="text-muted-content size-24 opacity-50" />
+							{#if !entry || (entry && (readonly || server || deploymentToDisplayTools || connectOnly))}
+								<h4 class="text-muted-content text-lg font-semibold">No tools</h4>
+								<p class="text-muted-content text-sm font-light">
+									Looks like this MCP server doesn't have any tools available currently.
+								</p>
+							{:else if !readonly && !connectOnly}
+								<h4 class="text-muted-content text-lg font-semibold">No tools</h4>
+								{#if !isMultiTenant}
+									<button
+										class="btn btn-primary flex items-center gap-1 text-sm"
+										onclick={handleInitTemporaryInstance}
+										disabled={saving}
+									>
+										{#if saving}
+											<Loading class="size-4" />
+										{:else}
+											Populate Tool Preview
+										{/if}
+									</button>
+								{/if}
+								{#if !error}
+									<p class="text-muted-content text-sm font-light">
+										{#if isMultiTenant}
+											Tools will populate when a server is deployed for the catalog entry.
+										{:else if type === 'remote'}
+											Click above to connect to the remote MCP server to populate capabilities and
+											tools for preview.
+										{:else}
+											Click above to set up a temporary instance that will populate capabilities and
+											tools for preview. Otherwise, tools will populate when the user first deploys
+											a server for the catalog entry.
+										{/if}
+									</p>
+								{/if}
+							{/if}
+						</div>
+						{#if error && showButtonInlineError}
+							<div class="mt-4 w-full">
+								{@render errorSnippet()}
+							</div>
+						{/if}
 					{/if}
 				{/snippet}
 			</McpServerTools>
@@ -1295,30 +1345,76 @@
 {/snippet}
 
 <Confirm
-	title="Update Deployments"
-	msg="Update existing deployments now?"
-	show={showUpdateExistingDeploymentsConfirm}
-	onsuccess={() => {
-		showUpdateExistingDeploymentsConfirm = false;
-		handleSelectionChange('server-instances');
-	}}
-	oncancel={() => {
-		showUpdateExistingDeploymentsConfirm = false;
-	}}
+	title={hasBothUpdateActions
+		? 'Updates Required'
+		: showUpdateExistingDeploymentsConfirm
+			? 'Update Deployments'
+			: 'Update vMCPs'}
+	msg={hasBothUpdateActions
+		? 'Existing deployments and vMCPs need to be updated.'
+		: showUpdateExistingDeploymentsConfirm
+			? 'Update existing deployments now?'
+			: 'Update existing vMCPs now?'}
+	show={showUpdateExistingConfirm}
+	onsuccess={hasBothUpdateActions
+		? undefined
+		: showUpdateExistingDeploymentsConfirm
+			? goToUpdateDeployments
+			: goToUpdateVmcps}
+	oncancel={closeUpdateExistingConfirm}
 	cancelText="Skip"
-	submitText="Go to Server Details"
+	submitText={showUpdateExistingDeploymentsConfirm ? 'Go to Server Details' : 'Go to vMCPs'}
+	hideCancelButton={hasBothUpdateActions}
 	type="info"
 >
 	{#snippet note()}
-		<p class="text-sm font-light">
-			There are existing deployment(s) of this MCP server that need to be updated. Would you like to
-			take care of this now?
-		</p>
+		{#if hasBothUpdateActions}
+			<p class="text-sm font-light">
+				There are existing deployment(s) and vMCP(s) using this MCP server that need to be updated.
+				Would you like to take care of this now?
+			</p>
 
-		{#if profile.current.hasAdminAccess?.()}
-			<p class="text-xs font-light mt-2 text-muted-content">
-				Deployments can also be updated at a later time through the "Server Details" tab or through
-				the MCP Management "Deployments" page.
+			{#if profile.current.hasAdminAccess?.()}
+				<p class="text-xs font-light mt-2 text-muted-content">
+					Deployments can also be updated at a later time through the "Server Details" tab or
+					through the MCP Management "Deployments" page.
+				</p>
+			{/if}
+
+			<div
+				class="mt-4 flex w-full flex-col items-center justify-center gap-2 md:flex-row md:justify-end"
+			>
+				<button
+					type="button"
+					onclick={goToUpdateDeployments}
+					class="btn btn-primary flex flex-1 justify-center p-2 w-full"
+				>
+					Go to Server Details
+				</button>
+				<button
+					type="button"
+					onclick={goToUpdateVmcps}
+					class="btn btn-primary flex flex-1 justify-center p-2 w-full"
+				>
+					Go to vMCPs
+				</button>
+			</div>
+		{:else if showUpdateExistingDeploymentsConfirm}
+			<p class="text-sm font-light">
+				There are existing deployment(s) of this MCP server that need to be updated. Would you like
+				to take care of this now?
+			</p>
+
+			{#if profile.current.hasAdminAccess?.()}
+				<p class="text-xs font-light mt-2 text-muted-content">
+					Deployments can also be updated at a later time through the "Server Details" tab or
+					through the MCP Management "Deployments" page.
+				</p>
+			{/if}
+		{:else}
+			<p class="text-sm font-light">
+				There are existing vMCP(s) using this MCP server that need to be updated. Would you like to
+				take care of this now?
 			</p>
 		{/if}
 	{/snippet}
