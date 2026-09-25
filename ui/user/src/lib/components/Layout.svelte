@@ -264,7 +264,16 @@
 					id: 'models',
 					label: 'Models',
 					href: '/models'
-				}
+				},
+				...(version.current.messagePoliciesEnabled && profile.current.hasAdminAccess?.()
+					? [
+							{
+								id: 'message-policies',
+								label: 'Message Policies',
+								href: '/admin/message-policies'
+							}
+						]
+					: [])
 			]
 		},
 		{
@@ -296,6 +305,15 @@
 								label: 'Enforcement Events',
 								href: '/admin/enforcement-events',
 								beta: true
+							}
+						]
+					: []),
+				...(version.current.messagePoliciesEnabled && profile.current.hasAdminAccess?.()
+					? [
+							{
+								id: 'policy-violations',
+								label: 'Message Policy Violations',
+								href: '/admin/policy-violations'
 							}
 						]
 					: [])

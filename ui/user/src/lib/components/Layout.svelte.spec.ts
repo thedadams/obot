@@ -139,6 +139,28 @@ describe('Layout.svelte', () => {
 		});
 	});
 
+	describe('when message policies are disabled', () => {
+		it('hides message policy navigation', async () => {
+			await renderLayout([Group.ADMIN], { messagePoliciesEnabled: false });
+
+			await expandSection('ai-resources', '/models');
+			await expandSection('operations', '/audit-logs');
+			await expectNoLink('/admin/message-policies');
+			await expectNoLink('/admin/policy-violations');
+		});
+	});
+
+	describe('when message policies are enabled', () => {
+		it('shows message policy navigation', async () => {
+			await renderLayout([Group.ADMIN], { messagePoliciesEnabled: true });
+
+			await expandSection('ai-resources', '/models');
+			await expandSection('operations', '/audit-logs');
+			await expectLink('/admin/message-policies');
+			await expectLink('/admin/policy-violations');
+		});
+	});
+
 	describe('based on user role', () => {
 		describe('when the user is an administrator', () => {
 			it('shows administrator-only navigation', async () => {
