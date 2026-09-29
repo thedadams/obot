@@ -5,6 +5,7 @@
 	import { UserService, type VMCP, type VMCPInstance } from '$lib/services';
 	import type { VMcpConnectOptions } from '$lib/services/vmcps/types';
 	import {
+		isCatalogSyncedVMcp,
 		vmcpConnectURL,
 		vmcpHasUserAllowedConfiguration,
 		vmcpInstanceNeedsUserConfiguration,
@@ -15,6 +16,7 @@
 	import { poll } from '$lib/utils';
 	import DotDotDot from '../DotDotDot.svelte';
 	import VMcpCardActions from './VMcpCardActions.svelte';
+	import VMcpCatalogSyncedIndicator from './VMcpCatalogSyncedIndicator.svelte';
 	import {
 		CircleFadingArrowUp,
 		ExternalLink,
@@ -80,8 +82,8 @@
 	let connectButtonId = $derived(`btn-connect-to-server-${vmcp.id}`);
 	let needsUpdate = $derived(vmcpNeedsUpdate(vmcp));
 	let isCreator = $derived(Boolean(vmcp.userID && profile.current.id === vmcp.userID));
-	let canDelete = $derived(Boolean(profile.current.isAdmin?.() || isCreator));
-	let canUpdate = $derived(canDelete);
+	let canUpdate = $derived(Boolean(profile.current.isAdmin?.() || isCreator));
+	let canDelete = $derived(canUpdate && !isCatalogSyncedVMcp(vmcp));
 	let canConnect = $derived(!vmcp.userID || isCreator);
 	let myInstances = $derived(
 		vmcpInstances.current.items.filter(
@@ -192,6 +194,7 @@
 		<div class="min-w-0 grow">
 			<div class="flex min-w-0 items-center gap-2">
 				<p class="truncate text-sm font-semibold">{name}</p>
+				<VMcpCatalogSyncedIndicator {vmcp} class="pointer-events-auto relative z-10" />
 			</div>
 			<p class="text-muted-content mt-0.5 line-clamp-2 text-xs font-light min-h-8">
 				<!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized by toInlineHTMLFromMarkdown -->
