@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -25,6 +26,10 @@ const (
 	obotOAuthClientName  = "Obot MCP OAuth"
 	figmaMCPURL          = "https://mcp.figma.com/mcp"
 	figmaOAuthClientName = "Claude Code"
+)
+
+var (
+	errStaticOAuthCredentialsNotConfigured = errors.New("static OAuth credentials are not configured")
 )
 
 type MCPOAuthHandlerFactory struct {
@@ -175,6 +180,14 @@ func (f *MCPOAuthHandlerFactory) CheckForMCPAuth(req api.Context, mcpServer v1.M
 			return "", fmt.Errorf("resolve VMCP OAuth credential: %w", err)
 		}
 		oauthHandler.credentialContext = credentialContext
+	}
+	if remote := mcpServer.Spec.Manifest.RemoteConfig; remote != nil && remote.StaticOAuthRequired {
+		if _, _, err := oauthHandler.Lookup(req.Context()); err != nil {
+			if errors.Is(err, errStaticOAuthCredentialsNotConfigured) {
+				return "", types.NewErrBadRequest("MCP server %s requires administrator static OAuth configuration", mcpServer.Name)
+			}
+			return "", fmt.Errorf("check static OAuth credentials for MCP server %s: %w", mcpServer.Name, err)
+		}
 	}
 	staticOAuthPending, err := f.staticOAuthPending(req.Context(), mcpServer, oauthHandler)
 	if err != nil {
@@ -416,6 +429,9 @@ func (m *mcpOAuthHandler) Lookup(ctx context.Context) (string, string, error) {
 	}
 	if credentialContext != "" {
 		cred, err := m.gatewayClient.RevealCredential(ctx, []string{credentialContext}, system.StaticOAuthCredentialName)
+		if err != nil && !errors.As(err, &client.CredentialNotFoundError{}) {
+			return "", "", fmt.Errorf("failed to retrieve static OAuth credentials for MCP server %q: %w", m.mcpID, err)
+		}
 		if err == nil {
 			clientID := cred.Secrets["CLIENT_ID"]
 			clientSecret := cred.Secrets["CLIENT_SECRET"]
@@ -425,5 +441,5 @@ func (m *mcpOAuthHandler) Lookup(ctx context.Context) (string, string, error) {
 		}
 	}
 
-	return "", "", fmt.Errorf("no credentials found for MCP server %s", m.mcpID)
+	return "", "", fmt.Errorf("%w for MCP server %s", errStaticOAuthCredentialsNotConfigured, m.mcpID)
 }

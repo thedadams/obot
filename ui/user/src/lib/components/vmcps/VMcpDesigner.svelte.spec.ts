@@ -50,6 +50,20 @@ const componentEntry = createMCPCatalogEntry({
 	}
 });
 
+function unconfiguredSalesforceEntry() {
+	return createMCPCatalogEntry({
+		id: 'entry-salesforce',
+		name: 'Salesforce',
+		runtime: 'remote',
+		manifest: {
+			remoteConfig: {
+				fixedURL: 'https://api.salesforce.com/platform/mcp/v1/platform/sobject-all',
+				staticOAuthRequired: true
+			}
+		}
+	});
+}
+
 const toolOverrides: ToolOverride[] = [
 	{ name: 'create_issue', description: 'Create an issue', enabled: true },
 	{ name: 'list_issues', description: 'List issues', enabled: false }
@@ -642,6 +656,30 @@ describe('VMcpDesigner.svelte', () => {
 				mcpServerCatalogEntryID: slack.id,
 				name: slack.manifest.name
 			});
+		});
+
+		it('keeps an unconfigured server visible but disabled', async () => {
+			const salesforce = unconfiguredSalesforceEntry();
+			const vmcp = createIssueTrackerVMcp();
+			const update = vi.fn();
+			mockUpdateVMcp(vmcp, update);
+			await renderDesigner([componentEntry, salesforce], vmcp);
+
+			const card = page.getByCSS('#mcp-server-card-entry-salesforce');
+			await expect.element(card).toBeVisible();
+			await expect.element(card).toBeDisabled();
+			await expect
+				.element(page.getByLabelText('Administrator configuration required'))
+				.toBeVisible();
+			(await card.element()).parentElement?.dispatchEvent(
+				new MouseEvent('mouseenter', { bubbles: true })
+			);
+			await expect
+				.element(page.getByRole('tooltip'))
+				.toHaveTextContent(
+					'An administrator must finish configuring this MCP server on the MCP Servers page before it can be added to a vMCP.'
+				);
+			expect(update).not.toHaveBeenCalled();
 		});
 
 		it('still drops when later pointer events fire on the canvas instead of the source card', async () => {

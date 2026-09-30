@@ -46,6 +46,7 @@
 		catalogConfigurationFields,
 		catalogEntryToVMCPComponent,
 		isCatalogSyncedVMcp,
+		mcpServerNeedsStaticOAuthConfiguration,
 		resolveVMcpComponents,
 		vmcpManifest
 	} from '$lib/services/vmcps/utils';
@@ -236,6 +237,7 @@
 
 	function handleDroppedOnCreate(entry: MCPCatalogEntry) {
 		if (!canEdit) return;
+		if (mcpServerNeedsStaticOAuthConfiguration(entry)) return;
 		createEditVMcp?.openCreate([catalogEntryToVMCPComponent(entry)]);
 	}
 
@@ -280,6 +282,7 @@
 
 	async function handleDropped(entry: MCPCatalogEntry, target: VMCP) {
 		if (!canEdit) return;
+		if (mcpServerNeedsStaticOAuthConfiguration(entry)) return;
 		const component = catalogEntryToVMCPComponent(entry);
 		componentDropPending = true;
 

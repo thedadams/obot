@@ -1,10 +1,12 @@
 import { createMCPCatalogEntry, createVMCP, createVMCPComponent } from '../../../tests/helpers/mcp';
+import { AiClient } from '../user/constants';
 import { SHORT_DESCRIPTION_MAX_LENGTH } from './constants';
 import type { RectLike } from './types';
 import {
 	appendComponentLabel,
 	borderAnchor,
 	buildMcpServerFilterOptions,
+	buildConnectAllSnippets,
 	buildVMcpComponentFilterOptions,
 	buildWirePath,
 	catalogConfigurationFields,
@@ -21,13 +23,40 @@ import {
 	sortMcpServers,
 	sortVMcps,
 	vmcpComponentDiffServers,
+	vmcpConnectURL,
 	vmcpHasUserAllowedConfiguration,
 	vmcpInstanceNeedsUserConfiguration,
+	vmcpNeedsAdminConfiguration,
 	vmcpNeedsUpdate,
 	vmcpOutdatedComponents,
 	vmcpUpdateConfigurationTargets
 } from './utils';
 import { describe, expect, it } from 'vitest';
+
+describe('vmcpConnectURL', () => {
+	it('only exposes a connection URL after the vMCP is ready', () => {
+		const vmcp = createVMCP({ id: 'vmcp1waiting' });
+		expect(vmcpConnectURL(vmcp)).toBe('/mcp-connect/vmcp1waiting');
+		vmcp.status = { ready: false };
+		expect(vmcpConnectURL(vmcp)).toBeUndefined();
+		expect(buildConnectAllSnippets(AiClient.Codex, [vmcp], false)[0].value).toBe('');
+		vmcp.status = undefined;
+		expect(vmcpConnectURL(vmcp)).toBeUndefined();
+	});
+});
+
+describe('vmcpNeedsAdminConfiguration', () => {
+	it('recognizes missing administrator configuration without treating startup waits as configuration gaps', () => {
+		const vmcp = createVMCP();
+		vmcp.status = {
+			ready: false,
+			components: [{ name: vmcp.components![0].name, error: 'waiting for component server' }]
+		};
+		expect(vmcpNeedsAdminConfiguration(vmcp)).toBe(false);
+		vmcp.status.components![0].error = 'missing required administrator configuration: API_TOKEN';
+		expect(vmcpNeedsAdminConfiguration(vmcp)).toBe(true);
+	});
+});
 
 function rect(left: number, top: number, width: number, height: number): RectLike {
 	return { left, top, width, height, right: left + width, bottom: top + height };

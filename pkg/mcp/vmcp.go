@@ -69,6 +69,22 @@ func (sm *SessionManager) serverConfigForVMCP(ctx context.Context, vmcp *v1.VMCP
 			return ServerConfig{}, err
 		}
 	}
+	var currentInstance v1.VMCPInstance
+	if instance != nil {
+		currentInstance = *instance
+	}
+	for _, component := range vmcpaccess.EnabledComponents(user, *vmcp, vmcpaccess.ComponentsForInstance(*vmcp, currentInstance)) {
+		manifest := component.CatalogEntry.Manifest
+		if manifest.RemoteConfig == nil || !manifest.RemoteConfig.StaticOAuthRequired {
+			continue
+		}
+		for _, status := range vmcp.Status.Components {
+			// An empty check hash means the controller has not checked the credential yet.
+			if status.Name == component.Name && status.ConfigurationError == "" && status.OAuthCredentialCheckHash != "" && !status.OAuthCredentialConfigured {
+				return ServerConfig{}, types.NewErrBadRequest("%s requires administrator static OAuth configuration", component.Name)
+			}
+		}
+	}
 
 	if instance == nil {
 		instance = &v1.VMCPInstance{

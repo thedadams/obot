@@ -82,6 +82,35 @@ export function vmcpNeedsUpdate(vmcp: VMCP) {
 	return vmcp.status?.components?.some((component) => component.needsUpdate) ?? false;
 }
 
+export function mcpServerNeedsStaticOAuthConfiguration(entry: MCPCatalogEntry): boolean {
+	return Boolean(
+		entry.manifest.runtime === 'remote' &&
+		entry.manifest.remoteConfig?.staticOAuthRequired &&
+		!entry.oauthCredentialConfigured
+	);
+}
+
+export function vmcpMissingStaticOAuthComponent(vmcp: VMCP): VMCPComponent | undefined {
+	return vmcp.components?.find(
+		(component) =>
+			component.catalogEntry?.manifest?.remoteConfig?.staticOAuthRequired &&
+			vmcp.status?.components?.some(
+				(status) =>
+					status.name === component.name &&
+					status.error === 'static OAuth credentials are not configured'
+			)
+	);
+}
+
+export function vmcpNeedsAdminConfiguration(vmcp: VMCP): boolean {
+	return Boolean(
+		vmcpMissingStaticOAuthComponent(vmcp) ||
+		vmcp.status?.components?.some((status) =>
+			status.error?.startsWith('missing required administrator configuration:')
+		)
+	);
+}
+
 export function vmcpHasUserAllowedConfiguration(vmcp: VMCP) {
 	return Boolean(
 		vmcp.components?.some((component) =>
@@ -215,6 +244,7 @@ function stripInformationalManifestFields<T extends object>(manifest: T): T {
 }
 
 export function vmcpConnectURL(vmcp: VMCP) {
+	if (!vmcp.status?.ready) return undefined;
 	const link = vmcp.links?.connectURL || vmcp.links?.['mcp-connect'];
 	if (link) return link;
 	const origin = typeof window !== 'undefined' ? window.location.origin : '';
