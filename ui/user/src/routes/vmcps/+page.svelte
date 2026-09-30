@@ -11,7 +11,10 @@
 	import Loading from '$lib/icons/Loading.svelte';
 	import { Group, UserService, type OrgUser, type VMCP } from '$lib/services';
 	import { COMMON_AI_CLIENTS } from '$lib/services/user/constants';
-	import type { VMcpListSettingsFilters, VMcpSortBy } from '$lib/services/vmcps/types';
+	import type {
+		VMcpListSettings as VMcpListSettingsType,
+		VMcpSortBy
+	} from '$lib/services/vmcps/types';
 	import {
 		buildVMcpComponentFilterOptions,
 		filterVMcps,
@@ -20,8 +23,9 @@
 	} from '$lib/services/vmcps/utils';
 	import { mcpServersAndEntries, profile, responsive, vmcpInstances } from '$lib/stores';
 	import { goto, setFilterUrlParams, setUrlParamAndUpdateUrl } from '$lib/url';
-	import { Layers, Plus } from '@lucide/svelte';
+	import { Layers, Pencil, Plus } from '@lucide/svelte';
 	import { onMount, untrack } from 'svelte';
+	import { fade } from 'svelte/transition';
 
 	let { data } = $props();
 	let views = $derived.by((): TabView[] =>
@@ -37,26 +41,25 @@
 
 	const sortByValues: VMcpSortBy[] = ['name', 'created', 'componentServers'];
 
-	function getInitialFilters(): VMcpListSettingsFilters {
+	function getInitialFilters(): VMcpListSettingsType {
 		const urlSortBy = page.url.searchParams.get('sortBy');
 		return {
 			showMyVMcpsOnly: page.url.searchParams.get('showMyVMcpsOnly') === 'true',
 			sortBy: sortByValues.includes(urlSortBy as VMcpSortBy) ? (urlSortBy as VMcpSortBy) : 'name',
 			query: page.url.searchParams.get('query') || '',
 			componentFilterBy: page.url.searchParams.get('components') || '',
-			statusFilterBy: page.url.searchParams.get('status') || ''
+			statusFilterBy: page.url.searchParams.get('status') || '',
+			variant: (page.url.searchParams.get('variant') as 'grid' | 'table') || 'grid'
 		};
 	}
 
 	let listedVMcps = $state<VMCP[]>(untrack(() => data?.vmcps ?? []));
 	let isLoading = $state(false);
-	let showMyVMcpsOnly = $state(untrack(() => getInitialFilters().showMyVMcpsOnly));
-	let sortBy = $state<VMcpSortBy>(untrack(() => getInitialFilters().sortBy));
-	let query = $state(untrack(() => getInitialFilters().query));
-	let componentFilterBy = $state(untrack(() => getInitialFilters().componentFilterBy));
-	let statusFilterBy = $state(untrack(() => getInitialFilters().statusFilterBy));
+	let filters = $state(getInitialFilters());
+	let vmcpList = $state<ReturnType<typeof VMcpList>>();
+
 	let vmcps = $derived.by(() => {
-		if (showMyVMcpsOnly) {
+		if (filters.showMyVMcpsOnly) {
 			return listedVMcps.filter((vmcp) => vmcp.creatorUserID === profile.current.id);
 		}
 		return listedVMcps;
@@ -92,9 +95,9 @@
 			filterVMcps(
 				vmcps,
 				{
-					query,
-					components: componentFilterBy,
-					status: statusFilterBy
+					query: filters.query,
+					components: filters.componentFilterBy,
+					status: filters.statusFilterBy
 				},
 				usersMap,
 				{
@@ -102,8 +105,8 @@
 					userId: profile.current.id
 				}
 			),
-			sortBy,
-			query,
+			filters.sortBy,
+			filters.query,
 			usersMap
 		)
 	);
@@ -136,33 +139,35 @@
 		goto(url, { replaceState: true });
 	}
 
-	function openVMcp(vmcp: VMCP) {
-		goto(`/vmcps/${vmcp.id}`);
-	}
+	function handleChange(property: keyof VMcpListSettingsType, values: string[]) {
+		vmcpList?.resetSelection();
 
-	function handleChange(property: keyof VMcpListSettingsFilters, values: string[]) {
 		switch (property) {
 			case 'showMyVMcpsOnly':
-				showMyVMcpsOnly = values.includes('true');
+				filters.showMyVMcpsOnly = values.includes('true');
 				setFilterUrlParams(property, values);
 				break;
 			case 'sortBy':
-				sortBy = sortByValues.includes(values[0] as VMcpSortBy)
+				filters.sortBy = sortByValues.includes(values[0] as VMcpSortBy)
 					? (values[0] as VMcpSortBy)
 					: 'name';
 				setFilterUrlParams(property, values);
 				break;
 			case 'query':
-				query = values[0] || '';
+				filters.query = values[0] || '';
 				setUrlParamAndUpdateUrl(page.url, 'query', values[0] || null);
 				break;
 			case 'componentFilterBy':
-				componentFilterBy = values.join(',');
+				filters.componentFilterBy = values.join(',');
 				setFilterUrlParams('components', values);
 				break;
 			case 'statusFilterBy':
-				statusFilterBy = values.join(',');
+				filters.statusFilterBy = values.join(',');
 				setFilterUrlParams('status', values);
+				break;
+			case 'variant':
+				filters.variant = values[0] as 'grid' | 'table';
+				setFilterUrlParams('variant', values);
 				break;
 		}
 	}
@@ -218,46 +223,59 @@
 	{#if isLoading}
 		<Loading class="text-primary" />
 	{:else}
-		<VMcpListSettings
-			filters={{
-				showMyVMcpsOnly,
-				sortBy,
-				query,
-				componentFilterBy,
-				statusFilterBy
-			}}
-			onChange={handleChange}
-			{componentFilterOptions}
-		/>
+		<VMcpListSettings {filters} onChange={handleChange} {componentFilterOptions}>
+			{#snippet actions()}
+				{#if filters.variant === 'grid' && !vmcpList?.isInSelectMode()}
+					<div in:fade>
+						<button class="btn btn-secondary" onclick={() => vmcpList?.toggleSelectMode()}>
+							<Pencil class="size-4" /> Edit Mode
+						</button>
+					</div>
+				{/if}
+				{#if filters.variant === 'grid' && vmcpList?.isInSelectMode()}
+					<button class="btn btn-secondary" onclick={() => vmcpList?.toggleSelectAll()}>
+						{vmcpList?.isAllSelected() ? 'Deselect All' : 'Select All'}
+					</button>
+				{/if}
+			{/snippet}
+		</VMcpListSettings>
 		<VMcpList
+			bind:this={vmcpList}
 			items={sortedVMcps}
 			components={vmcpComponents}
-			onSelect={openVMcp}
 			onDelete={(item) => createEditVMcp?.openDelete(item)}
+			onDeleted={(deleted) => {
+				listedVMcps = listedVMcps.filter((vmcp) => vmcp.id !== deleted.id);
+			}}
 			onUpdate={(updated) => {
 				listedVMcps = listedVMcps.map((vmcp) => (vmcp.id === updated.id ? updated : vmcp));
 			}}
 			{usersMap}
+			variant={filters.variant}
 		>
 			{#snippet noDataContent()}
-				<div class="my-12 flex w-md flex-col items-center gap-4 self-center text-center">
-					<Layers class="text-muted-content size-24 opacity-25" />
-					<div>
-						<h4 class="text-muted-content text-lg font-semibold">
-							{profile.current.hasAdminAccess?.() ? 'Create a vMCP!' : 'No vMCPs available'}
-						</h4>
-						<p class="text-muted-content text-sm font-light">
-							{profile.current.hasAdminAccess?.()
-								? 'Click below to get started.'
-								: "Looks like there aren't any vMCPs available yet."}
-						</p>
+				{#if filters.query}
+					<p class="text-muted-content text-sm font-light">No vMCPs found matching your query.</p>
+				{:else}
+					<div class="my-12 flex w-md flex-col items-center gap-4 self-center text-center">
+						<Layers class="text-muted-content size-24 opacity-25" />
+						<div>
+							<h4 class="text-muted-content text-lg font-semibold">
+								{profile.current.hasAdminAccess?.() ? 'Create a vMCP!' : 'No vMCPs available'}
+							</h4>
+							<p class="text-muted-content text-sm font-light">
+								{profile.current.hasAdminAccess?.()
+									? 'Click below to get started.'
+									: "Looks like there aren't any vMCPs available yet."}
+							</p>
+						</div>
+						{#if canCreate}
+							<button class="btn btn-primary" onclick={openCreate}>
+								<Plus class="size-4" /> Create vMCP Now
+							</button>
+						{/if}
 					</div>
-					{#if canCreate}
-						<button class="btn btn-primary" onclick={openCreate}>
-							<Plus class="size-4" /> Create vMCP Now
-						</button>
-					{/if}
-				</div>
+				{/if}
 			{/snippet}
 		</VMcpList>
 	{/if}
@@ -273,6 +291,7 @@
 	bind:this={createEditVMcp}
 	onDeleted={(deleted) => {
 		listedVMcps = listedVMcps.filter((vmcp) => vmcp.id !== deleted.id);
+		vmcpList?.resetSelection();
 	}}
 />
 

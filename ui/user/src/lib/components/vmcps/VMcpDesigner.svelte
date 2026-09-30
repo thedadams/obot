@@ -372,14 +372,15 @@
 		setUrlParamAndUpdateUrl(page.url, 'query', value);
 	};
 
-	function leaveDesigner() {
-		onBack?.();
-		if (!onBack) goto('/vmcps');
-	}
-
 	function handleBack() {
 		if (profilesPanel?.leaveEditor()) return;
-		leaveDesigner();
+		if (onBack) {
+			onBack();
+		} else if (history.length > 1) {
+			history.back();
+		} else {
+			goto('/vmcps', { replaceState: true });
+		}
 	}
 
 	$effect(() => {
@@ -611,7 +612,9 @@
 <CreateEditVMcp
 	bind:this={createEditVMcp}
 	onCreated={handleVMcpCreated}
-	onDeleted={leaveDesigner}
+	onDeleted={() => {
+		goto('/vmcps', { replaceState: true });
+	}}
 	onUpdated={(updated) => {
 		selectedVMcp = updated;
 	}}

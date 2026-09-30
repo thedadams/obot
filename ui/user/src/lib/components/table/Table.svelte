@@ -291,12 +291,16 @@
 		visibleItems.filter((d) => (validateSelect ? validateSelect(d) : true)).length
 	);
 
+	export function clearSelect(id: string) {
+		delete selected[id];
+	}
+
 	export function clearSelectAll() {
 		selected = {};
 	}
 
 	function getColumnMinWidth(width: number, index: number, columnCount: number): number {
-		if (index === 0 && tableSelectActions) return 57;
+		if (index === 0 && tableSelectActions) return validateSelect ? 76 : 57;
 		if (actions && index === columnCount - 1) return Math.max(width, ACTIONS_MIN_WIDTH);
 		// if filterable fields are present, add width to account for filter button
 		return Math.max(width * 0.3, 100) + (filterableFields.size > 0 ? 36 : 0);

@@ -3,9 +3,11 @@
 	import Search from '$lib/components/Search.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import { VMCP_SORT_OPTIONS, VMCP_STATUS_FILTER_OPTIONS } from '$lib/services/vmcps/constants';
-	import type { VMcpFilterOption, VMcpListSettingsFilters } from '$lib/services/vmcps/types';
+	import type { VMcpFilterOption, VMcpListSettings } from '$lib/services/vmcps/types';
 	import { parseSelectedFilterIds } from '$lib/services/vmcps/utils';
-	import { Funnel, X } from '@lucide/svelte';
+	import { Funnel, LayoutGrid, X, Table } from '@lucide/svelte';
+	import type { Snippet } from 'svelte';
+	import { twMerge } from 'tailwind-merge';
 
 	const BUTTON_ID = 'vmcp-settings-button';
 	const SORT_LABEL_ID = 'vmcp-sort-by-label';
@@ -14,12 +16,13 @@
 	const selectClasses = 'min-h-8 py-1 text-sm bg-base-200 dark:bg-base-100 shadow-inner!';
 
 	interface Props {
-		filters: VMcpListSettingsFilters;
-		onChange: (property: keyof VMcpListSettingsFilters, values: string[]) => void;
+		filters: VMcpListSettings;
+		onChange: (property: keyof VMcpListSettings, values: string[]) => void;
 		componentFilterOptions?: VMcpFilterOption[];
+		actions?: Snippet;
 	}
 
-	let { filters, onChange, componentFilterOptions = [] }: Props = $props();
+	let { filters, onChange, componentFilterOptions = [], actions }: Props = $props();
 	let dialog = $state<ReturnType<typeof ResponsiveDialog>>();
 	let componentDraft = $state<string | number | undefined>('');
 	let statusDraft = $state<string | number | undefined>('');
@@ -60,7 +63,7 @@
 </script>
 
 <div class="bg-base-200 dark:bg-base-100 sticky top-16 left-0 z-20 w-full py-1">
-	<div class="flex items-center gap-2">
+	<div class="flex items-center gap-4">
 		<Search
 			value={filters.query}
 			onChange={(value) => onChange('query', value ? [value] : [])}
@@ -99,6 +102,28 @@
 			{/each}
 		</div>
 	{/if}
+</div>
+
+<div class="flex items-center justify-between gap-2">
+	<div class="flex items-center gap-2">
+		{#if actions}
+			{@render actions()}
+		{/if}
+	</div>
+	<div class="flex items-center gap-2">
+		<button
+			class={twMerge('btn', filters.variant === 'grid' ? 'btn-active' : undefined)}
+			onclick={() => onChange('variant', ['grid'])}
+		>
+			<LayoutGrid class="size-4" /> Grid View
+		</button>
+		<button
+			class={twMerge('btn', filters.variant === 'table' ? 'btn-active' : undefined)}
+			onclick={() => onChange('variant', ['table'])}
+		>
+			<Table class="size-4" /> Table View
+		</button>
+	</div>
 </div>
 
 <ResponsiveDialog bind:this={dialog} title="vMCPs Settings" class="md:w-md">

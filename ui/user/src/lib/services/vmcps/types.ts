@@ -43,12 +43,13 @@ export type VMcpFilters = {
 	status?: string;
 };
 
-export type VMcpListSettingsFilters = {
+export type VMcpListSettings = {
 	showMyVMcpsOnly: boolean;
 	sortBy: VMcpSortBy;
 	query: string;
 	componentFilterBy: string;
 	statusFilterBy: string;
+	variant: 'grid' | 'table';
 };
 
 export type VMcpFilterContext = {
