@@ -21,7 +21,6 @@ import (
 	"github.com/obot-platform/obot/pkg/api"
 	gateway "github.com/obot-platform/obot/pkg/gateway/client"
 	"github.com/obot-platform/obot/pkg/mcp"
-	"github.com/obot-platform/obot/pkg/principal"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
 	obottunnel "github.com/obot-platform/obot/pkg/tunnel"
@@ -783,7 +782,7 @@ func mcpServerOrInstanceFromConnectURL(req api.Context, id, secretBindingAllowed
 						MCPCatalogName:            server.Spec.MCPCatalogID,
 						MCPServerCatalogEntryName: server.Spec.MCPServerCatalogEntryName,
 						PowerUserWorkspaceID:      server.Spec.PowerUserWorkspaceID,
-						UserID:                    principal.ResourceOwnerID(req.User),
+						UserID:                    req.User.GetUID(),
 						Config:                    server.Spec.Manifest.UserConfig(),
 					},
 				}

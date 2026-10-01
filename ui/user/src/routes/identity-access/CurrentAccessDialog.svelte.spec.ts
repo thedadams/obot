@@ -1,6 +1,4 @@
 import { AdminService, type Model, type ModelAccessPolicy } from '$lib/services';
-import { version } from '$lib/stores';
-import { getVersionResponse } from '../../tests/mocks/data';
 import CurrentAccessDialog from './CurrentAccessDialog.svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
@@ -8,7 +6,6 @@ import { page } from 'vitest/browser';
 
 afterEach(() => {
 	vi.restoreAllMocks();
-	version.initialize();
 });
 
 function mockAccessPolicyLists() {
@@ -16,7 +13,6 @@ function mockAccessPolicyLists() {
 	vi.spyOn(AdminService, 'listAllUserWorkspaceAccessControlRules').mockResolvedValue([]);
 	vi.spyOn(AdminService, 'listModelAccessPolicies').mockResolvedValue([]);
 	vi.spyOn(AdminService, 'listSkillAccessPolicies').mockResolvedValue([]);
-	vi.spyOn(AdminService, 'listHostedAgentAccessPolicies').mockResolvedValue([]);
 	vi.spyOn(AdminService, 'listAllVMCPs').mockResolvedValue([]);
 }
 
@@ -44,37 +40,16 @@ describe('CurrentAccessDialog.svelte', () => {
 		await expect.element(page.getByText('No policies currently apply to this user.')).toBeVisible();
 	});
 
-	describe('when Hosted Agents are disabled', () => {
-		it('hides the Hosted Agents tab', async () => {
-			version.initialize({
-				...getVersionResponse,
-				hostedAgentsEnabled: false
-			});
-			mockAccessPolicyLists();
+	it('omits the removed Hosted Agents tab', async () => {
+		mockAccessPolicyLists();
 
-			const result = await render(CurrentAccessDialog);
-			result.component.open({ kind: 'user', id: 'user-1', name: 'Ada' });
+		const result = await render(CurrentAccessDialog);
+		result.component.open({ kind: 'user', id: 'user-1', name: 'Ada' });
 
-			await expect.element(page.getByRole('button', { name: 'MCP Servers' })).toBeVisible();
-			await expect
-				.element(page.getByRole('button', { name: 'Hosted Agents' }))
-				.not.toBeInTheDocument();
-		});
-	});
-
-	describe('when Hosted Agents are enabled', () => {
-		it('shows the Hosted Agents tab', async () => {
-			version.initialize({
-				...getVersionResponse,
-				hostedAgentsEnabled: true
-			});
-			mockAccessPolicyLists();
-
-			const result = await render(CurrentAccessDialog);
-			result.component.open({ kind: 'user', id: 'user-1', name: 'Ada' });
-
-			await expect.element(page.getByRole('button', { name: 'Hosted Agents' })).toBeVisible();
-		});
+		await expect.element(page.getByRole('button', { name: 'MCP Servers' })).toBeVisible();
+		await expect
+			.element(page.getByRole('button', { name: 'Hosted Agents' }))
+			.not.toBeInTheDocument();
 	});
 
 	it("lists resources granted by the user's Obot groups and auth provider groups", async () => {

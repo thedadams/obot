@@ -1,0 +1,18 @@
+{{- if .Values.substrate.poc.enabled }}
+{{- if not .Values.substrate.enabled }}
+{{- fail "substrate.enabled must be true when substrate.poc.enabled is true" }}
+{{- end }}
+{{- $_ := required "substrate.poc.image must contain the Claude runtime image digest" .Values.substrate.poc.image }}
+{{- if not (regexMatch "@sha256:[a-f0-9]{64}$" .Values.substrate.poc.image) }}
+{{- fail "substrate.poc.image must be pinned by sha256 digest" }}
+{{- end }}
+{{- $_ := required "substrate.poc.snapshotLocation must be an s3:// or gs:// bucket URL" .Values.substrate.poc.snapshotLocation }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.substrate.poc.namespace | quote }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+{{- end }}

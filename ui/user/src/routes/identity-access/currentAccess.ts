@@ -30,7 +30,6 @@ export type AccessResourceType =
 	| 'model'
 	| 'skill'
 	| 'skillRepository'
-	| 'hostedAgent'
 	| 'vmcp'
 	| 'selector';
 
@@ -77,7 +76,6 @@ export interface CurrentAccessSections {
 	mcp: MatchedAccessPolicy[];
 	models: MatchedAccessPolicy[];
 	skills: MatchedAccessPolicy[];
-	hostedAgents: MatchedAccessPolicy[];
 	vmcps: MatchedAccessPolicy[];
 }
 
@@ -376,15 +374,6 @@ export async function loadCurrentAccess(
 				(policy) => policy.resources ?? []
 			);
 		}
-		case 'hostedAgents': {
-			const hostedAgents = await AdminService.listHostedAgentAccessPolicies();
-			return matchPolicies(
-				hostedAgents,
-				target,
-				(policy) => `/hosted-agents/access-policies/${policy.id}`,
-				(policy) => policy.resources ?? []
-			);
-		}
 		case 'vmcps': {
 			const vmcps = await AdminService.listAllVMCPs();
 			return matchVmcpProfiles(vmcps, target);
@@ -397,7 +386,6 @@ export function hasAnyCurrentAccess(sections: CurrentAccessSections): boolean {
 		sections.mcp.length > 0 ||
 		sections.models.length > 0 ||
 		sections.skills.length > 0 ||
-		sections.hostedAgents.length > 0 ||
 		sections.vmcps.length > 0
 	);
 }

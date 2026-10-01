@@ -21,7 +21,6 @@
 		'agent-management': true,
 		'mcp-server-management': true,
 		'skills-management': true,
-		'hosted-agent-management': true,
 		'device-management': true,
 		'user-management': true,
 		'llm-gateway': true,
@@ -94,7 +93,6 @@
 		X,
 		Logs,
 		Settings2,
-		MessageSquareText,
 		ChevronRight
 	} from '@lucide/svelte';
 	import { tick, untrack } from 'svelte';
@@ -212,7 +210,6 @@
 		}
 	}
 
-	let hostedAgentsFeatureEnabled = $derived(version.current.hostedAgentsEnabled === true);
 	let isAtLeastPoweruser = $derived(profile.current.groups.includes(Group.POWERUSER));
 
 	let hasLicenseEntitlementViolations = $derived(
@@ -243,6 +240,15 @@
 					label: 'vMCPs',
 					href: '/vmcps'
 				},
+				...(version.current.substrateAgentsEnabled
+					? [
+							{
+								id: 'agent-instances',
+								label: 'Agents (POC)',
+								href: '/agent-instances'
+							}
+						]
+					: []),
 				...(isAtLeastPoweruser || profile.current.hasAdminAccess?.()
 					? [
 							{
@@ -298,16 +304,6 @@
 					: [])
 			]
 		},
-		...(hostedAgentsFeatureEnabled
-			? [
-					{
-						id: 'hosted-agents',
-						label: 'Hosted Agents',
-						icon: MessageSquareText,
-						href: '/hosted-agents'
-					}
-				]
-			: []),
 		{
 			id: 'identity-and-access',
 			label: 'Identity & Access',

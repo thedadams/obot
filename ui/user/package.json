@@ -90,8 +90,6 @@
 		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@novnc/novnc": "1.4.0",
 		"@oddbird/popover-polyfill": "^0.6.1",
-		"@xterm/addon-fit": "^0.10.0",
-		"@xterm/xterm": "^5.5.0",
 		"d3": "^7.9.0",
 		"d3-time-format": "^4.1.0",
 		"daisyui": "^5.7.18",

@@ -187,15 +187,6 @@ func TestAuthProviderCleanupCleansAllGroupReferencesAfterProviderPruned(t *testi
 			},
 		},
 	}
-	hostedAgentRule := &v1.HostedAgentAccessRule{
-		Name:      "hosted-agent-rule",
-		Namespace: namespace,
-		Spec: v1.HostedAgentAccessRuleSpec{
-			Manifest: clienttypes.HostedAgentAccessRuleManifest{
-				Subjects: mixedSubjects,
-			},
-		},
-	}
 	publishedArtifact := &v1.PublishedArtifact{
 		Name:      "artifact",
 		Namespace: namespace,
@@ -221,7 +212,7 @@ func TestAuthProviderCleanupCleansAllGroupReferencesAfterProviderPruned(t *testi
 	baseClient := fake.NewClientBuilder().
 		WithScheme(storagescheme.Scheme).
 		WithStatusSubresource(&v1.PublishedArtifact{}).
-		WithObjects(cleanupTask, accessRule, modelPolicy, skillRule, messagePolicy, hostedAgentRule, publishedArtifact).
+		WithObjects(cleanupTask, accessRule, modelPolicy, skillRule, messagePolicy, publishedArtifact).
 		Build()
 	storageClient := &generatedNameClient{WithWatch: baseClient}
 	gatewayClient, gatewayDB := newAuthProviderCleanupGatewayClient(t)
@@ -302,9 +293,6 @@ func TestAuthProviderCleanupCleansAllGroupReferencesAfterProviderPruned(t *testi
 	gotMessagePolicy := &v1.MessagePolicy{}
 	mustGet(t, storageClient, messagePolicy, gotMessagePolicy)
 	assertSubjects(t, gotMessagePolicy.Spec.Manifest.Subjects, wantSubjects)
-	gotHostedAgentRule := &v1.HostedAgentAccessRule{}
-	mustGet(t, storageClient, hostedAgentRule, gotHostedAgentRule)
-	assertSubjects(t, gotHostedAgentRule.Spec.Manifest.Subjects, wantSubjects)
 	gotArtifact := &v1.PublishedArtifact{}
 	mustGet(t, storageClient, publishedArtifact, gotArtifact)
 	assertSubjects(t, gotArtifact.Status.Versions[0].Subjects, wantSubjects)

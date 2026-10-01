@@ -58,7 +58,7 @@ func (a *AuthProviderCleanup) Cleanup(req router.Request, resp router.Response) 
 		return err
 	}
 	if !checkpoint.DataDeleted {
-		counts := make(map[string]int, 6)
+		counts := make(map[string]int, 5)
 		if counts["accessControlRules"], err = cleanupAccessControlRuleGroups(req, groupIDPrefix); err != nil {
 			return err
 		}
@@ -69,9 +69,6 @@ func (a *AuthProviderCleanup) Cleanup(req router.Request, resp router.Response) 
 			return err
 		}
 		if counts["messagePolicies"], err = cleanupMessagePolicyGroups(req, groupIDPrefix); err != nil {
-			return err
-		}
-		if counts["hostedAgentAccessRules"], err = cleanupHostedAgentAccessRuleGroups(req, groupIDPrefix); err != nil {
 			return err
 		}
 		if counts["publishedArtifacts"], err = cleanupPublishedArtifactGroups(req, groupIDPrefix); err != nil {
@@ -246,26 +243,6 @@ func cleanupMessagePolicyGroups(req router.Request, groupIDPrefix string) (int, 
 		list.Items[i].Spec.Manifest.Subjects = subjects
 		if err := req.Client.Update(req.Ctx, &list.Items[i]); err != nil {
 			return updated, fmt.Errorf("update message policy %s for auth provider cleanup: %w", list.Items[i].Name, err)
-		}
-		updated++
-	}
-	return updated, nil
-}
-
-func cleanupHostedAgentAccessRuleGroups(req router.Request, groupIDPrefix string) (int, error) {
-	var list v1.HostedAgentAccessRuleList
-	if err := req.Client.List(req.Ctx, &list, &kclient.ListOptions{Namespace: req.Namespace}); err != nil {
-		return 0, fmt.Errorf("list hosted agent access rules for auth provider cleanup: %w", err)
-	}
-	updated := 0
-	for i := range list.Items {
-		subjects, changed := removeGroupSubjects(list.Items[i].Spec.Manifest.Subjects, groupIDPrefix)
-		if !changed {
-			continue
-		}
-		list.Items[i].Spec.Manifest.Subjects = subjects
-		if err := req.Client.Update(req.Ctx, &list.Items[i]); err != nil {
-			return updated, fmt.Errorf("update hosted agent access rule %s for auth provider cleanup: %w", list.Items[i].Name, err)
 		}
 		updated++
 	}

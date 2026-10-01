@@ -7,7 +7,6 @@
 	import {
 		AdminService,
 		ModelAliasLabels,
-		type HostedAgent,
 		type Model,
 		type ModelAlias,
 		type OrgUser,
@@ -15,7 +14,7 @@
 		type SkillRepository
 	} from '$lib/services';
 	import type { Skill } from '$lib/services/nanobot/types';
-	import { errors, mcpServersAndEntries, version } from '$lib/stores';
+	import { errors, mcpServersAndEntries } from '$lib/stores';
 	import { getUserDisplayName } from '$lib/utils';
 	import {
 		ACCESS_MATCH_REASON_LABEL,
@@ -45,7 +44,6 @@
 		mcp: [],
 		models: [],
 		skills: [],
-		hostedAgents: [],
 		vmcps: []
 	});
 
@@ -53,7 +51,6 @@
 		mcp: false,
 		models: false,
 		skills: false,
-		hostedAgents: false,
 		vmcps: false
 	});
 
@@ -70,7 +67,6 @@
 	let models = $state<Model[]>([]);
 	let skills = $state<Skill[]>([]);
 	let skillRepositories = $state<SkillRepository[]>([]);
-	let hostedAgents = $state<HostedAgent[]>([]);
 	let mcpOwners = $state<OrgUser[]>([]);
 	let loadingResources = $state<Record<SectionKey, boolean>>(idleLoading());
 	let loadedPolicySections = new SvelteSet<SectionKey>();
@@ -181,9 +177,6 @@
 						AdminService.listSkillRepositories()
 					]);
 					break;
-				case 'hostedAgents':
-					hostedAgents = await AdminService.listHostedAgents({ all: true });
-					break;
 			}
 		} catch (error) {
 			loadedResourceSections.delete(section);
@@ -204,7 +197,6 @@
 	const skillRepositoriesMap = $derived(
 		new Map(skillRepositories.map((repository) => [repository.id, repository]))
 	);
-	const hostedAgentsMap = $derived(new Map(hostedAgents.map((agent) => [agent.id, agent])));
 	const mcpOwnersMap = $derived(new Map(mcpOwners.map((owner) => [owner.id, owner])));
 
 	function describeResource(resource: AccessPolicyResource): AccessResourceDescription {
@@ -239,8 +231,6 @@
 					name: skillRepositoriesMap.get(resource.id)?.displayName || resource.id,
 					typeLabel: 'Skill Repository'
 				};
-			case 'hostedAgent':
-				return { name: hostedAgentsMap.get(resource.id)?.name || resource.id };
 			case 'vmcp':
 				return { name: resource.name || resource.id };
 			default:
@@ -251,16 +241,12 @@
 	const titleName = $derived(viewing?.name ?? target?.name ?? '');
 	const subjectLabel = $derived(viewing?.kind === 'group' ? 'group' : 'user');
 
-	let hostedAgentsFeatureEnabled = $derived(version.current.hostedAgentsEnabled === true);
-	const tabs = $derived([
-		{ label: 'vMCPs', value: 'vmcps' as const, noun: 'vMCPs' },
-		{ label: 'MCP Servers', value: 'mcp' as const, noun: 'MCP servers' },
-		{ label: 'Models', value: 'models' as const, noun: 'models' },
-		{ label: 'Skills', value: 'skills' as const, noun: 'skills' },
-		...(hostedAgentsFeatureEnabled
-			? [{ label: 'Hosted Agents', value: 'hostedAgents' as const, noun: 'hosted agents' }]
-			: [])
-	]);
+	const tabs = [
+		{ label: 'vMCPs', value: 'vmcps', noun: 'vMCPs' },
+		{ label: 'MCP Servers', value: 'mcp', noun: 'MCP servers' },
+		{ label: 'Models', value: 'models', noun: 'models' },
+		{ label: 'Skills', value: 'skills', noun: 'skills' }
+	] as const satisfies readonly { label: string; value: SectionKey; noun: string }[];
 
 	const currentNoun = $derived(tabs.find((tab) => tab.value === currentTab)?.noun ?? 'resources');
 	const currentPolicies = $derived(sections[currentTab]);
@@ -299,8 +285,6 @@
 						id: repository.id
 					}))
 				];
-			case 'hostedAgents':
-				return hostedAgents.map((agent) => ({ type: 'hostedAgent' as const, id: agent.id }));
 			default:
 				return [];
 		}
@@ -363,8 +347,7 @@
 		vmcps: 'All vMCPs',
 		mcp: 'All MCP servers',
 		models: 'All models',
-		skills: 'All skills',
-		hostedAgents: 'All hosted agents'
+		skills: 'All skills'
 	};
 
 	function policiesGrantingEverything(policies: MatchedAccessPolicy[]): MatchedAccessPolicy[] {

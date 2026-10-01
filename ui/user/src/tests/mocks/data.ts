@@ -498,7 +498,6 @@ export const getVersionResponse = {
 	engine: 'docker',
 	enterprise: false,
 	hideK8sDetails: false,
-	hostedAgentsEnabled: true,
 	latestVersion: 'v0.0.0-dev',
 	licenseEntitlementViolations: undefined,
 	licenseEntitlements: undefined,

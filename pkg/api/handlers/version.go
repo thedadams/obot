@@ -43,7 +43,7 @@ type VersionHandlerOptions struct {
 	AuthEnabled             bool
 	MessagePoliciesEnabled  bool
 	AgentsEnabled           bool
-	HostedAgentsEnabled     bool
+	SubstrateAgentsEnabled  bool
 	HideK8sDetails          bool
 	UpgradeStatusReader     UpgradeStatusReader
 }
@@ -184,7 +184,7 @@ func (v *VersionHandler) featureValues() map[string]bool {
 	return map[string]bool{
 		"messagePoliciesEnabled": v.MessagePoliciesEnabled,
 		"agentsEnabled":          v.AgentsEnabled,
-		"hostedAgentsEnabled":    v.HostedAgentsEnabled,
+		"substrateAgentsEnabled": v.SubstrateAgentsEnabled,
 		"hideK8sDetails":         v.HideK8sDetails,
 	}
 }

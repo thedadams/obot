@@ -66,17 +66,9 @@ func TestVMCPComponentsRequireInternalForwarding(t *testing.T) {
 		if err := storage.Create(t.Context(), alias); err != nil {
 			t.Fatal(err)
 		}
-		for _, caller := range []User{newUser(&user.DefaultInfo{UID: "7"}), agentUser(alias.Name)} {
-			allowed, err := authorizer.checkMCPID(httptest.NewRequest(http.MethodPost, "/mcp-connect/"+alias.Name, nil), &Resources{MCPID: alias.Name}, caller)
-			if err != nil || allowed {
-				t.Fatalf("legacy instance bypassed aggregate: allowed=%v error=%v", allowed, err)
-			}
-		}
-		for _, scope := range []string{server.Name, vmcp.Name, "*"} {
-			allowed, err := authorizer.checkMCPID(httptest.NewRequest(http.MethodPost, "/mcp-connect/"+server.Name, nil), &Resources{MCPID: server.Name}, agentUser(scope))
-			if err != nil || allowed {
-				t.Fatalf("hosted agent bypassed aggregate: allowed=%v error=%v", allowed, err)
-			}
+		allowed, err := authorizer.checkMCPID(httptest.NewRequest(http.MethodPost, "/mcp-connect/"+alias.Name, nil), &Resources{MCPID: alias.Name}, newUser(&user.DefaultInfo{UID: "7"}))
+		if err != nil || allowed {
+			t.Fatalf("legacy instance bypassed aggregate: allowed=%v error=%v", allowed, err)
 		}
 		for _, tc := range []struct {
 			name    string
@@ -767,7 +759,7 @@ func TestMCPConnectSubtreeAuthorization(t *testing.T) {
 			},
 		},
 	).Build()
-	authorizer := NewAuthorizer(nil, storage, storage, false, nil, nil, nil, false)
+	authorizer := NewAuthorizer(nil, storage, storage, false, nil, nil, false)
 
 	tests := []struct {
 		name    string
@@ -955,7 +947,7 @@ func TestLegacyMCPServerAPIsRejectRetiredActions(t *testing.T) {
 			Spec:      v1.MCPServerInstanceSpec{UserID: "user-uid"},
 		},
 	).Build()
-	authorizer := NewAuthorizer(nil, storage, storage, false, nil, nil, nil, false)
+	authorizer := NewAuthorizer(nil, storage, storage, false, nil, nil, false)
 	u := &user.DefaultInfo{UID: "user-uid", Groups: []string{types.GroupAPI, types.GroupPowerUser, types.GroupPowerUserPlus}}
 
 	for _, route := range []struct {
@@ -1114,7 +1106,7 @@ func TestVMCPTesterChatRequiresConnectionAccess(t *testing.T) {
 		},
 	}
 	storage := clientfake.NewClientBuilder().WithScheme(storagescheme.Scheme).WithObjects(vmcp, instance).Build()
-	authorizer := NewAuthorizer(nil, storage, storage, false, nil, nil, nil, false)
+	authorizer := NewAuthorizer(nil, storage, storage, false, nil, nil, false)
 
 	for _, tc := range []struct {
 		name   string
