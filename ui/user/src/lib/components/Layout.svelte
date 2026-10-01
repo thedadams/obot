@@ -77,8 +77,6 @@
 	import SetupSplashDialog from './admin/SetupSplashDialog.svelte';
 	import CommunitySignupBanner from './admin/license/CommunitySignupBanner.svelte';
 	import LicenseViolationBanner from './admin/license/LicenseViolationBanner.svelte';
-	import GuidePanel from './guides/GuidePanel.svelte';
-	import Guide from './guides/Guides.svelte';
 	import BetaLogo from './navbar/BetaLogo.svelte';
 	import Profile from './navbar/Profile.svelte';
 	import IconButton from './primitives/IconButton.svelte';
@@ -215,7 +213,6 @@
 	}
 
 	let hostedAgentsFeatureEnabled = $derived(version.current.hostedAgentsEnabled === true);
-	let isBootStrapUser = $derived(profile.current.isBootstrapUser?.() ?? false);
 	let isAtLeastPoweruser = $derived(profile.current.groups.includes(Group.POWERUSER));
 
 	let hasLicenseEntitlementViolations = $derived(
@@ -264,16 +261,7 @@
 					id: 'models',
 					label: 'Models',
 					href: '/models'
-				},
-				...(version.current.messagePoliciesEnabled && profile.current.hasAdminAccess?.()
-					? [
-							{
-								id: 'message-policies',
-								label: 'Message Policies',
-								href: '/admin/message-policies'
-							}
-						]
-					: [])
+				}
 			]
 		},
 		{
@@ -305,15 +293,6 @@
 								label: 'Enforcement Events',
 								href: '/admin/enforcement-events',
 								beta: true
-							}
-						]
-					: []),
-				...(version.current.messagePoliciesEnabled && profile.current.hasAdminAccess?.()
-					? [
-							{
-								id: 'policy-violations',
-								label: 'Message Policy Violations',
-								href: '/admin/policy-violations'
 							}
 						]
 					: [])
@@ -708,11 +687,6 @@
 				<PanelLeftOpen class="size-6" />
 			</IconButton>
 		</div>
-	{/if}
-
-	{#if !isBootStrapUser && !responsive.isMobile}
-		<GuidePanel />
-		<Guide />
 	{/if}
 </div>
 

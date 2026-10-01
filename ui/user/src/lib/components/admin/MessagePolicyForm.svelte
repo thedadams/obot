@@ -4,12 +4,12 @@
 	import Loading from '$lib/icons/Loading.svelte';
 	import {
 		AdminService,
+		PolicyDirectionLabels,
 		type MessagePolicy,
 		type MessagePolicyManifest,
 		type OrgUser,
 		type OrgGroup,
-		type PolicyDirection,
-		PolicyDirectionLabels
+		type PolicyDirection
 	} from '$lib/services';
 	import { goto } from '$lib/url';
 	import { convertSubjectsToTableData, resolveSubjects } from '../../subjectResolver';
@@ -26,10 +26,21 @@
 		messagePolicy?: MessagePolicy;
 		onCreate?: (messagePolicy: MessagePolicy) => void;
 		onUpdate?: (messagePolicy: MessagePolicy) => void;
+		onCancel?: () => void;
+		fixedDirection?: PolicyDirection;
+		listHref: string;
 		readonly?: boolean;
 	}
 
-	let { messagePolicy: initialMessagePolicy, onCreate, onUpdate, readonly }: Props = $props();
+	let {
+		messagePolicy: initialMessagePolicy,
+		onCreate,
+		onUpdate,
+		onCancel,
+		fixedDirection,
+		listHref,
+		readonly
+	}: Props = $props();
 
 	const duration = PAGE_TRANSITION_DURATION;
 	let messagePolicy = $state(
@@ -39,7 +50,7 @@
 				({
 					displayName: '',
 					definition: '',
-					direction: 'both' as PolicyDirection,
+					direction: (fixedDirection ?? 'both') as PolicyDirection,
 					subjects: []
 				} as MessagePolicyManifest)
 		)
@@ -105,6 +116,11 @@
 		return () => controller.abort();
 	});
 
+	const directionOptions = (['user-message', 'tool-calls', 'both'] as const).map((id) => ({
+		id,
+		label: PolicyDirectionLabels[id]
+	}));
+
 	function validate(policy: typeof messagePolicy) {
 		if (!policy) return false;
 
@@ -115,10 +131,6 @@
 			(policy.subjects?.length ?? 0) > 0
 		);
 	}
-
-	const directionOptions: { id: string; label: string }[] = Object.entries(
-		PolicyDirectionLabels
-	).map(([id, label]) => ({ id, label }));
 </script>
 
 <div
@@ -148,9 +160,7 @@
 			</div>
 		{/if}
 
-		<div
-			class="dark:bg-base-200 dark:border-base-400 bg-base-100 rounded-lg border border-transparent p-4"
-		>
+		<div class="paper p-4">
 			<div class="flex flex-col gap-6">
 				{#if !messagePolicy.id}
 					<div class="flex flex-col gap-2">
@@ -190,7 +200,7 @@
 						rows="3"></textarea>
 				</div>
 
-				<div class="flex flex-col gap-2">
+				<div class="flex flex-col gap-1">
 					<label for="message-policy-direction" class="flex-1 text-sm font-light capitalize">
 						Applies to
 					</label>
@@ -201,8 +211,8 @@
 						onSelect={(option) => {
 							messagePolicy.direction = option.id as PolicyDirection;
 						}}
-						disabled={readonly}
-						class="text-input-filled mt-0.5"
+						disabled
+						class="bg-base-200 dark:bg-base-200 dark:border-base-400 flex-1 border border-transparent shadow-inner"
 					/>
 				</div>
 			</div>
@@ -276,7 +286,11 @@
 					<button
 						class="btn btn-secondary text-sm"
 						onclick={() => {
-							goto('/admin/message-policies');
+							if (onCancel) {
+								onCancel();
+								return;
+							}
+							goto(listHref);
 						}}
 					>
 						Cancel
@@ -362,7 +376,7 @@
 		if (!messagePolicy.id) return;
 		saving = true;
 		await AdminService.deleteMessagePolicy(messagePolicy.id);
-		goto('/admin/message-policies');
+		goto(listHref);
 	}}
 	oncancel={() => (deletingPolicy = false)}
 />

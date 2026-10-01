@@ -5,6 +5,7 @@
 	import TabLayout from '$lib/components/TabLayout.svelte';
 	import McpServerEntryForm from '$lib/components/admin/McpServerEntryForm.svelte';
 	import McpServerGitSync from '$lib/components/admin/McpServerGitSync.svelte';
+	import MessagePoliciesView from '$lib/components/admin/MessagePoliciesView.svelte';
 	import SelectServerType from '$lib/components/mcp/SelectServerType.svelte';
 	import {
 		DEFAULT_MCP_CATALOG_ID,
@@ -20,7 +21,7 @@
 		type MCPCatalog,
 		type OrgUser
 	} from '$lib/services';
-	import { mcpServersAndEntries, profile } from '$lib/stores';
+	import { mcpServersAndEntries, profile, version } from '$lib/stores';
 	import {
 		clearUrlParams,
 		getTableUrlParamsFilters,
@@ -48,6 +49,7 @@
 		'deployments',
 		'filters',
 		'tunnels',
+		'ai-judge-policies',
 		'access-policies'
 	] as const;
 	const serverTypes: LaunchServerType[] = ['hosted', 'multi', 'remote'];
@@ -69,6 +71,7 @@
 	let syncInterval = $state<ReturnType<typeof setInterval>>();
 
 	let hasAdminAccess = $derived(profile.current.hasAdminAccess?.());
+	let messagePoliciesEnabled = $derived(version.current.messagePoliciesEnabled === true);
 	let isAdminReadonly = $derived(profile.current.isAdminReadonly?.());
 	let isPowerUser = $derived(profile.current.groups.includes(Group.POWERUSER));
 	let isPowerUserPlus = $derived(profile.current.groups.includes(Group.POWERUSER_PLUS));
@@ -95,7 +98,13 @@
 		if (isPowerUser && isNewEntry) return true;
 		if (isPowerUserPlus && (isNewEntry || selectedView === 'access-policies')) return true;
 		if (hasAdminAccess && !isAdminReadonly) {
-			return isNewEntry || ['access-policies', 'filters', 'tunnels'].includes(selectedView);
+			const adminCreateViews = [
+				'access-policies',
+				'filters',
+				'tunnels',
+				...(messagePoliciesEnabled ? ['ai-judge-policies'] : [])
+			];
+			return isNewEntry || adminCreateViews.includes(selectedView);
 		}
 		return false;
 	});
@@ -108,6 +117,8 @@
 				return 'Create Filter';
 			case 'tunnels':
 				return 'Create MCP Tunnel';
+			case 'ai-judge-policies':
+				return 'Create AI Judge Policy';
 			case 'access-policies':
 				return 'Create MCP Access Policy';
 			default:
@@ -116,18 +127,67 @@
 	});
 	let views = $derived([
 		...(hasAdminAccess || isPowerUser
-			? [{ label: 'Servers', value: 'servers', content: servers }]
+			? [
+					{
+						label: 'Servers',
+						value: 'servers',
+						content: servers,
+						tooltip:
+							'MCP Servers gives AI systems a predictable way to plug into databases, local files, search engines, and APIs; these are the core components of vMCPs. Create or manage them here.'
+					}
+				]
 			: []),
 		...(hasAdminAccess
 			? [
-					{ label: 'Sources', value: 'sources', content: sources },
-					{ label: 'Deployments', value: 'deployments', content: deployments },
-					{ label: 'Filters', value: 'filters', content: filters },
-					{ label: 'Tunnels', value: 'tunnels', content: tunnels }
+					{
+						label: 'Sources',
+						value: 'sources',
+						content: sources,
+						tooltip:
+							'Manage URLs containing a repository of MCP servers that are supplied to the Obot gateway.'
+					},
+					{
+						label: 'Deployments',
+						value: 'deployments',
+						content: deployments,
+						tooltip: 'Manage running instances of MCP servers.'
+					},
+					{
+						label: 'Filters',
+						value: 'filters',
+						content: filters,
+						tooltip:
+							'Intercept tool requests and responses of MCP servers to provide custom validation, logging, security checks, or other business logic before they are processed.'
+					},
+					{
+						label: 'Tunnels',
+						value: 'tunnels',
+						content: tunnels,
+						tooltip:
+							'Set up tunnels to let the Obot gateway reach remote HTTP or HTTPS MCP servers that are not directly accessible from the Obot gateway.'
+					}
 				]
 			: []),
 		...(isPowerUserPlus || hasAdminAccess
-			? [{ label: 'Access Policies', value: 'access-policies', content: accessPolicy }]
+			? [
+					{
+						label: 'Access Policies',
+						value: 'access-policies',
+						content: accessPolicy,
+						tooltip: 'Manage which MCP servers a user or group can access.'
+					}
+				]
+			: []),
+		...(hasAdminAccess && messagePoliciesEnabled
+			? [
+					{
+						label: 'AI Judge Policies',
+						value: 'ai-judge-policies',
+						content: messagePolicies,
+						tooltip:
+							'Enforce MCP server tool calls with the LLM or view policy violations against existing policies.'
+					}
+				]
 			: [])
 	]);
 
@@ -234,6 +294,8 @@
 			{@render filters()}
 		{:else if selectedView === 'tunnels'}
 			{@render tunnels()}
+		{:else if selectedView === 'ai-judge-policies'}
+			{@render messagePolicies()}
 		{:else if selectedView === 'access-policies'}
 			{@render accessPolicy()}
 		{/if}
@@ -313,6 +375,13 @@
 			<Plus class="size-4" />
 			Create MCP Tunnel
 		</button>
+	{:else if view === 'ai-judge-policies' && messagePoliciesEnabled && !isAdminReadonly}
+		<button
+			class="btn btn-primary flex items-center gap-1 text-sm"
+			onclick={() => openCreate('ai-judge-policies')}
+		>
+			<Plus class="size-4" /> Add AI Judge Policy
+		</button>
 	{:else if view === 'access-policies' && !isAdminReadonly}
 		<button
 			id={MCP_ACCESS_POLICY_FIELD_IDS.addPolicyBtn}
@@ -370,6 +439,14 @@
 
 {#snippet tunnels()}
 	<TunnelsView mcpTunnels={data.mcpTunnels} tunnelConnections={data.tunnelConnections} />
+{/snippet}
+
+{#snippet messagePolicies()}
+	<MessagePoliciesView
+		messagePolicies={data.messagePolicies ?? []}
+		policyDirection="tool-calls"
+		creating={creating && selectedView === 'ai-judge-policies'}
+	/>
 {/snippet}
 
 {#snippet accessPolicy()}
