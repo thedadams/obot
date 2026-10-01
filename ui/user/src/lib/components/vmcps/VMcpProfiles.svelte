@@ -13,6 +13,10 @@
 		toolOverrides: ToolOverride[];
 		grant?: VMCPComponentSet;
 		initialEnabledTools?: string[];
+		// Set when the component has no stored tool list (an as-is component) and
+		// toolOverrides was built from the grant's tool names. The total number of
+		// tools on the server is unknown until the tools are refreshed.
+		toolsFromGrant?: boolean;
 	};
 	type ProfileManifest = {
 		allowAllComponents: boolean;
@@ -239,10 +243,17 @@
 			resources: componentServers
 				.map((component) => {
 					const id = componentId(component);
-					const tools = initialTools(component);
 					const grant = permissions?.allowedComponents?.[id];
 					const effectiveGrant = grant ?? (permissions?.allowAllComponents ? {} : undefined);
 					const names = effectiveGrant?.allowedTools;
+					let tools = initialTools(component);
+					// As-is components keep no tool list, so fall back to the names the
+					// profile grants rather than fetching tools from the server.
+					const toolsFromGrant = tools.length === 0 && Array.isArray(names) && !names.includes('*');
+					if (toolsFromGrant) {
+						// allowedTools may repeat a name; the tool list is keyed by name.
+						tools = [...new Set(names)].map((name) => ({ name, enabled: true }));
+					}
 					const toolOverrides = clampToComponent(
 						effectiveGrant && (names == null || names.includes('*'))
 							? tools
@@ -253,7 +264,8 @@
 						id,
 						grant,
 						initialEnabledTools: [...enabledToolNames(toolOverrides)],
-						toolOverrides
+						toolOverrides,
+						toolsFromGrant
 					};
 				})
 				.filter((resource) => resource.id)
@@ -425,7 +437,8 @@
 				...resource,
 				grant: undefined,
 				toolOverrides,
-				initialEnabledTools: [...enabledToolNames(toolOverrides)]
+				initialEnabledTools: [...enabledToolNames(toolOverrides)],
+				toolsFromGrant: false
 			};
 		});
 		profile.allowAllComponents = true;
@@ -705,6 +718,7 @@
 			const toolOverrides = baselineTools(id);
 			resource.toolOverrides = toolOverrides;
 			resource.initialEnabledTools = [...enabledToolNames(toolOverrides)];
+			resource.toolsFromGrant = false;
 			return;
 		}
 		profile.resources = profile.resources.map((resource) => {
@@ -716,7 +730,8 @@
 					...resource,
 					grant: undefined,
 					toolOverrides,
-					initialEnabledTools: [...enabledToolNames(toolOverrides)]
+					initialEnabledTools: [...enabledToolNames(toolOverrides)],
+					toolsFromGrant: false
 				};
 			}
 			const current = resource.toolOverrides.length ? resource.toolOverrides : baselineTools(id);
@@ -726,7 +741,12 @@
 				baseline.some((tool) => tool.enabled !== false)
 					? baseline
 					: current;
-			const next = { ...resource, toolOverrides };
+			const next = {
+				...resource,
+				toolOverrides,
+				// Still partial only if the grant-derived list was kept.
+				toolsFromGrant: resource.toolsFromGrant === true && toolOverrides === resource.toolOverrides
+			};
 			return {
 				...next,
 				initialEnabledTools: [...enabledToolNames(toolOverrides)],
@@ -801,9 +821,11 @@
 				const granted = isResourceGranted(profile, resource);
 				const changed =
 					granted &&
-					([...profileEnabled].some((name) => !componentEnabled.has(name)) ||
+					(resource.toolsFromGrant === true ||
+						[...profileEnabled].some((name) => !componentEnabled.has(name)) ||
 						[...componentEnabled].some((name) => !profileEnabled.has(name)));
 				return {
+					totalKnown: !resource.toolsFromGrant,
 					id: resource.id,
 					name: component ? componentName(component) : resource.id,
 					icon: component?.catalogEntry?.manifest?.icon,
@@ -844,7 +866,8 @@
 						...resource,
 						toolOverrides,
 						initialEnabledTools: enabledNames,
-						grant: { allowedTools: enabledNames }
+						grant: { allowedTools: enabledNames },
+						toolsFromGrant: false
 					}
 				: resource
 		);
@@ -1096,7 +1119,12 @@
 										>
 											{@render componentIdentity()}
 											<span class="text-muted-content text-xs">
-												{enabledToolCount(resource)} of {modifiableTools(resource).length} tools
+												{#if resource.toolsFromGrant}
+													{enabledToolCount(resource)}
+													{enabledToolCount(resource) === 1 ? 'tool' : 'tools'}
+												{:else}
+													{enabledToolCount(resource)} of {modifiableTools(resource).length} tools
+												{/if}
 											</span>
 											<span
 												class="text-muted-content flex size-8 shrink-0 items-center justify-center"
@@ -1145,6 +1173,7 @@
 										>
 											<VMcpProfileToolsOverride
 												bind:tools={resource.toolOverrides}
+												partial={resource.toolsFromGrant}
 												toolPrefix={component.toolPrefix}
 												componentId={id}
 												lockedTools={lockedToolNames(resource)}
@@ -1334,7 +1363,9 @@
 													)}
 												>
 													{resource.changed
-														? `${resource.enabled} of ${resource.total}`
+														? resource.totalKnown
+															? `${resource.enabled} of ${resource.total}`
+															: `${resource.enabled} ${resource.enabled === 1 ? 'tool' : 'tools'}`
 														: resource.granted
 															? 'Default'
 															: 'Disabled'}
