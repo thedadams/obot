@@ -23861,6 +23861,13 @@ func schema_storage_apis_obotobotai_v1_MCPServerCatalogEntryStatus(ref common.Re
 							Format:      "",
 						},
 					},
+					"staticConfigurationRevision": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StaticConfigurationRevision is the static configuration revision whose superseded revisions have been deleted.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
