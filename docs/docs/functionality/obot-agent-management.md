@@ -1,35 +1,30 @@
 ---
+displayed_sidebar: sidebar
 title: Obot Agent Management
 ---
 
-# Obot Agent Management
+For the current task-based instructions, see [Run your first agent](../agents/first-agent.md). This page preserves existing bookmarks.
 
-:::note
-Obot Agent features are disabled by default for new deployments, and the **Obot Agent Management** section is hidden while they are disabled. To enable them, set the `OBOT_ENABLE_AGENTS=true` environment variable on the server. Deployments that already had agents before upgrading remain enabled automatically. See the [configuration reference](../configuration/server-configuration.md) for details.
-:::
+## Token Usage {#token-usage}
 
-Obot Agent Management provides administrators with tools to configure default agent settings and monitor agent and conversation activity. Access these features from **Obot Agent Management** in the sidebar.
+Continue to [Token Usage](../agents/first-agent.md#obot-agent-management-token-usage).
 
-## Token Usage
+## Model Providers {#model-providers}
 
-View token usage across users and models to monitor costs and identify optimization opportunities.
+Continue to [Model Providers](../agents/first-agent.md#obot-agent-management-model-providers).
 
-:::note
-Token counts are reported for the Azure API key provider. Obot estimates spend when a deployment name exactly matches a model in its pricing catalog; deployments with different names cannot be reliably mapped to the underlying model and do not have estimated spend.
-:::
+## Model Access Policies {#model-access-policies}
 
-## Model Providers
+Continue to [Model Access Policies](../agents/first-agent.md#obot-agent-management-model-access-policies).
 
-Configure LLM providers and their available models. See [Model Providers](../configuration/model-providers.md) for setup details.
+<span id="ai-judge-policies" />
 
-## Model Access Policies
+## AI Judge Policies {#message-policies}
 
-Control which users and groups can access which models in Obot Agent. See [Model Access Policies](./model-access-policies.md) for details.
+Continue to [AI Judge Policies](../agents/first-agent.md#obot-agent-management-message-policies).
 
-## AI Judge Policies
+<span id="ai-judge-policy-violations" />
 
-Use natural language to enforce content rules on user prompts and tool calls. See [AI Judge Policies](./ai-judge-policies.md) for details.
+## AI Judge Policy Violations {#message-policy-violations}
 
-## AI Judge Policy Violations
-
-Review policy violations, trends, and blocked content metadata for AI Judge Policies from the same admin area.
+Continue to [AI Judge Policy Violations](../agents/first-agent.md#obot-agent-management-message-policy-violations).

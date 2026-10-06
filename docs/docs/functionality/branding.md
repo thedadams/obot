@@ -1,10 +1,10 @@
 ---
-title: Branding
+title: "Customize branding"
 ---
 
-# Branding
+# Customize branding {#branding}
 
-Branding allows administrators to customize the visual appearance of the Obot platform. Access this page from **Branding** in the sidebar.
+Branding allows administrators to customize the visual appearance of the Obot platform. Access this page from **Platform > Branding**.
 
 ## Theme
 

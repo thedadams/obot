@@ -1,29 +1,26 @@
 ---
+displayed_sidebar: sidebar
 title: Obot Agent
 ---
 
-# Obot Agent
+For the current task-based instructions, see [Supported workloads and availability](../agents/availability.md). This page preserves existing bookmarks.
 
-Obot Agent is a chat interface built to work directly with MCP. It provides a conversational way for users to interact with MCP servers and accomplish tasks using AI.
+## Key Concepts {#key-concepts}
 
-:::note
-Obot Agent features are disabled by default for new deployments. To enable them, set the `OBOT_ENABLE_AGENTS=true` environment variable on the server. Deployments that already had agents before upgrading remain enabled automatically. See the [configuration reference](../configuration/server-configuration.md) for details.
-:::
+Continue to [Key Concepts](../agents/availability.md#obot-agent-key-concepts).
 
-## Key Concepts
+### Conversations {#conversations}
 
-### Conversations
+Continue to [Conversations](../agents/availability.md#obot-agent-conversations).
 
-Conversations provide isolated message history while sharing the agent's configuration and resources.
+### Workflows {#workflows}
 
-### Workflows
+Continue to [Workflows](../agents/availability.md#obot-agent-workflows).
 
-Workflows automate interactions through scheduled or on-demand execution. They can run on recurring schedules or be triggered manually.
+### Model Providers {#model-providers}
 
-### Model Providers
+Continue to [Model Providers](../agents/availability.md#obot-agent-model-providers).
 
-Obot Agent supports multiple LLM providers including OpenAI, Anthropic, Azure OpenAI, and Amazon Bedrock. Model providers are configured at the platform level and made available to users.
+## Learn More {#learn-more}
 
-## Learn More
-
-- [Obot Agent Management](../functionality/obot-agent-management.md) - Configure default agent, conversation, and workflow settings
+Continue to [Learn More](../agents/availability.md#obot-agent-learn-more).

@@ -1,4 +1,8 @@
-# Model Providers
+---
+title: "Configure providers and models"
+---
+
+# Configure providers and models {#model-providers}
 
 The Model Providers page allows administrators to configure and manage various AI model providers. This guide will walk you through the setup process and explain the available options.
 
@@ -8,9 +12,9 @@ Obot supports a variety of model providers, including:
 
 - OpenAI
 - Anthropic
-- [Generic Responses Compatible Provider](#generic-responses-compatible-provider)
-- [Azure OpenAI / Microsoft Foundry](#azure)
-- [Amazon Bedrock](#amazon-bedrock)
+- [Generic Responses Compatible Provider](./model-providers.md#generic-responses-compatible-provider)
+- [Azure OpenAI / Microsoft Foundry](./model-providers.md#azure)
+- [Amazon Bedrock](./model-providers.md#amazon-bedrock)
 - Google Vertex (Gemini models)
 
 The UI will indicate whether each provider has been configured. If a provider is configured you will have the ability to modify or deconfigure it.
