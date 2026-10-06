@@ -12,6 +12,7 @@
 	import Loading from '$lib/icons/Loading.svelte';
 	import { AdminService, UserService, Group, Role, type OrgUser } from '$lib/services';
 	import { userRoleOptions } from '$lib/services/admin/constants';
+	import type { OrgUserStatus } from '$lib/services/user/types';
 	import { profile, version } from '$lib/stores';
 	import { clearProductAnalyticsConsentDeferral } from '$lib/stores/productTelemetryConsent.svelte';
 	import { formatTimeAgo } from '$lib/time';
@@ -40,17 +41,39 @@
 	let urlFilters = $derived(getTableUrlParamsFilters());
 	let initSort = $derived(getTableUrlParamsSort({ property: 'created', order: 'desc' }));
 
+	const statusLabels: Record<OrgUserStatus, string> = {
+		active: 'Active',
+		disabled: 'Disabled',
+		deleted: 'Deleted'
+	};
+	const disabledReasonLabels: Record<string, string> = {
+		scim_inactive: 'Deactivated in identity provider',
+		scim_unprovisioned: 'Not provisioned by identity provider'
+	};
+	// Why a user cannot be deleted in Obot, as the server refuses it: their identity provider still
+	// provisions them through SCIM. Once it deactivates them, they can be deleted.
+	const PRIVILEGED_ROLES = Role.OWNER | Role.AUDITOR | Role.USER_IMPERSONATION;
+	const STILL_PROVISIONED_MESSAGE =
+		'This user is still active in your identity provider. Remove their assignment there before deleting them in Obot.';
+
 	const tableData = $derived(
 		users
 			.map((user) => ({
 				...user,
+				lifecycleStatus: user.status ?? 'active',
+				status: statusLabels[user.status ?? 'active'],
+				disabledReasonLabel: user.disabledReason
+					? (disabledReasonLabels[user.disabledReason] ?? user.disabledReason)
+					: undefined,
 				assignedRole: user.role,
 				name: getUserDisplayName(user),
 				role: getUserRoleLabel(user.role).split(','),
 				effectiveRole: getUserRoleLabel(user.effectiveRole).split(','),
 				roleId: user.role & ~(Role.AUDITOR | Role.USER_IMPERSONATION),
 				auditor: user.role & Role.AUDITOR ? true : false,
-				userImpersonation: user.role & Role.USER_IMPERSONATION ? true : false
+				userImpersonation: user.role & Role.USER_IMPERSONATION ? true : false,
+				// Only an Owner can enable a user with any of these roles, from their own role or a group.
+				privileged: (user.effectiveRole & PRIVILEGED_ROLES) !== 0
 			}))
 			.filter(
 				(user) =>
@@ -65,6 +88,7 @@
 	let updateRoleDialog = $state<ReturnType<typeof ResponsiveDialog>>();
 	let updatingRole = $state<TableItem>();
 	let deletingUser = $state<TableItem>();
+	let enablingUser = $state<TableItem>();
 	let confirmHandoffToUser = $state<TableItem>();
 	let confirmAuditorAdditionToUser = $state<TableItem>();
 	let confirmUserImpersonationAdditionToUser = $state<TableItem>();
@@ -214,13 +238,19 @@
 			/>
 			<Table
 				data={tableData}
-				fields={['name', 'email', 'role', 'effectiveRole', 'lastActiveDay', 'created']}
-				filterable={['name', 'email', 'role', 'effectiveRole']}
+				fields={['name', 'email', 'status', 'role', 'effectiveRole', 'lastActiveDay', 'created']}
+				filterable={['name', 'email', 'status', 'role', 'effectiveRole']}
 				filters={urlFilters}
 				onFilter={setFilterUrlParams}
 				onClearAllFilters={clearUrlParams}
-				sortable={['name', 'email', 'role', 'effectiveRole', 'lastActiveDay', 'created']}
+				sortable={['name', 'email', 'status', 'role', 'effectiveRole', 'lastActiveDay', 'created']}
 				headers={[
+					{
+						title: 'Status',
+						property: 'status',
+						tooltip:
+							'Disabled users keep their account, roles, and data, but cannot sign in or use their credentials.'
+					},
 					{ title: 'Assigned Role', property: 'role' },
 					{
 						title: 'Actual Role',
@@ -234,7 +264,33 @@
 				onSort={setSortUrlParams}
 			>
 				{#snippet onRenderColumn(property, d)}
-					{#if property === 'role'}
+					{#if property === 'status'}
+						<div class="flex flex-col gap-0.5">
+							<div class="flex items-center gap-1">
+								<span
+									class={[
+										'badge badge-sm whitespace-nowrap',
+										d.lifecycleStatus === 'active' && 'badge-ghost',
+										d.lifecycleStatus === 'disabled' && 'badge-warning badge-soft',
+										d.lifecycleStatus === 'deleted' && 'badge-error badge-soft'
+									]}
+								>
+									{d.status}
+								</span>
+								{#if d.managementSource === 'scim'}
+									<span
+										class="badge badge-ghost badge-xs"
+										use:tooltip={"This user's status is managed by your identity provider through SCIM. Change it there."}
+									>
+										SCIM
+									</span>
+								{/if}
+							</div>
+							{#if d.disabledReasonLabel}
+								<span class="text-xs text-muted-content">{d.disabledReasonLabel}</span>
+							{/if}
+						</div>
+					{:else if property === 'role'}
 						<div class="flex items-center gap-1">
 							{d.role}
 							{#if d.explicitRole}
@@ -283,10 +339,27 @@
 							>
 								Update Role
 							</button>
+							{#if d.lifecycleStatus === 'disabled'}
+								<button
+									class="menu-button"
+									disabled={d.privileged && !profile.current.groups.includes(Group.OWNER)}
+									onclick={() => (enablingUser = d)}
+								>
+									Enable User
+								</button>
+							{/if}
+							{@const stillProvisioned =
+								d.managementSource === 'scim' && d.lifecycleStatus !== 'disabled'}
 							<button
 								class="menu-button text-error"
-								disabled={d.explicitRole ||
+								disabled={stillProvisioned ||
+									d.explicitRole ||
 									(d.groups.includes(Group.OWNER) && !profile.current.groups.includes(Group.OWNER))}
+								use:tooltip={{
+									text: stillProvisioned ? STILL_PROVISIONED_MESSAGE : undefined,
+									placement: 'left',
+									classes: ['z-50']
+								}}
 								onclick={() => (deletingUser = d)}
 							>
 								Delete User
@@ -304,15 +377,45 @@
 <Confirm
 	msg={`Delete user ${deletingUser?.email}?`}
 	show={Boolean(deletingUser)}
+	{loading}
 	onsuccess={async () => {
 		if (!deletingUser) return;
 		loading = true;
-		await AdminService.deleteUser(deletingUser.id);
-		users = await UserService.listUsers();
-		loading = false;
-		deletingUser = undefined;
+		try {
+			await AdminService.deleteUser(deletingUser.id);
+			users = await UserService.listUsers();
+		} catch {
+			// The refusal is shown as a notification, and asking again would be refused again.
+		} finally {
+			loading = false;
+			deletingUser = undefined;
+		}
 	}}
 	oncancel={() => (deletingUser = undefined)}
+/>
+
+<Confirm
+	title="Confirm Enable"
+	msg={`Enable user ${enablingUser?.email}?`}
+	note="They regain access to Obot with their account, including their API keys and agents."
+	show={Boolean(enablingUser)}
+	{loading}
+	type="info"
+	submitText="Enable"
+	onsuccess={async () => {
+		if (!enablingUser) return;
+		loading = true;
+		try {
+			await AdminService.enableUser(enablingUser.id);
+			users = await UserService.listUsers();
+		} catch {
+			// The refusal is shown as a notification, and asking again would be refused again.
+		} finally {
+			loading = false;
+			enablingUser = undefined;
+		}
+	}}
+	oncancel={() => (enablingUser = undefined)}
 />
 
 <ResponsiveDialog
