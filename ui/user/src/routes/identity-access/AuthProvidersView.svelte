@@ -21,6 +21,7 @@
 		SCIM_VIEW_PATH
 	} from '$lib/constants';
 	import { HttpError, parseErrorContent } from '$lib/errors.js';
+	import { m } from '$lib/i18n';
 	import { reloadPage } from '$lib/navigation';
 	import { AdminService, UserService } from '$lib/services';
 	import type {
@@ -46,9 +47,9 @@
 	const SWITCH_STEPS = ['configure', 'signin', 'switch'] as const;
 	type SwitchStep = (typeof SWITCH_STEPS)[number];
 	const SWITCH_STEP_LABELS: Record<SwitchStep, string> = {
-		configure: 'Configure',
-		signin: 'Sign in',
-		switch: 'Switch'
+		configure: m.identity_access_auth_providers_step_configure(),
+		signin: m.identity_access_auth_providers_step_signin(),
+		switch: m.identity_access_auth_providers_step_switch()
 	};
 
 	function sortAuthProviders(authProviders: AuthProvider[]) {
@@ -117,17 +118,17 @@
 	// and what setting SCIM up for the incoming provider takes.
 	let switchNote = $derived.by(() => {
 		const incoming = configuringAuthProvider?.name;
-		const notes = [`This cannot be undone. Everyone signs in through ${incoming} afterwards.`];
+		const notes = [
+			m.identity_access_auth_providers_switch_cannot_undo({
+				name: `${configuringAuthProvider?.name}`
+			})
+		];
 		if (activeProvider?.scimState) {
 			const outgoing = activeProvider.name;
-			notes.push(
-				`Switching deletes ${outgoing}'s SCIM connection, with its groups, group memberships, and group role assignments, and removes its groups from access policies. Its users are kept. Users that SCIM disabled stay disabled until an administrator enables them. Turn off provisioning in ${outgoing}: its requests fail from then on. Using SCIM with ${outgoing} again starts over, with a new token.`
-			);
+			notes.push(m.identity_access_auth_providers_scim_switch_deletes({ name: outgoing }));
 		}
 		if (configuringAuthProvider?.scimState) {
-			notes.push(
-				`${incoming} provisions users and groups through SCIM. After the switch, generate its SCIM token and enter it in ${incoming}.`
-			);
+			notes.push(m.identity_access_auth_providers_scim_switch_incoming({ name: incoming ?? '' }));
 		}
 		return notes.join(' ');
 	});
@@ -150,7 +151,18 @@
 		// A referenced group ID that no group has is listed for its references, which go, but is no group.
 		const groups = residualData?.groups.filter((group) => group.name).length ?? 0;
 		const memberships = residualData?.membershipCount ?? 0;
-		return `This deletes ${groups} ${groups === 1 ? 'group' : 'groups'} and ${memberships} ${memberships === 1 ? 'group membership' : 'group memberships'}. It cannot be undone.`;
+		const groupLabel =
+			groups === 1
+				? m.identity_access_scim_count_group_one({ count: groups })
+				: m.identity_access_scim_count_group_other({ count: groups });
+		const membershipLabel =
+			memberships === 1
+				? m.identity_access_scim_count_membership_one({ count: memberships })
+				: m.identity_access_scim_count_membership_other({ count: memberships });
+		return m.identity_access_auth_providers_scim_residual_summary({
+			groups: groupLabel,
+			memberships: membershipLabel
+		});
 	});
 	// A switch is only offered when this provider would replace a different one. Configuring the
 	// first provider on a fresh install stays the plain form.
@@ -336,7 +348,10 @@
 			if (value && value !== scim.connectionIssuer) {
 				return {
 					kind: 'warning',
-					text: `SCIM users and groups belong to the ${provider.name} organization they were provisioned from, ${scim.connectionIssuer}. Change this only if that organization moved, for example to a custom domain. Pointing ${provider.name} at another organization leaves them bound to the old one.`
+					text: m.identity_access_auth_providers_scim_issuer_warning({
+						name: provider.name,
+						issuer: scim.connectionIssuer
+					})
 				};
 			}
 		}
@@ -347,8 +362,8 @@
 			return {
 				kind: 'info',
 				text: empty
-					? `With these left empty, ${provider.name} provisions users and groups through SCIM, and Obot never fetches groups from it. Setup continues on Identity & Access → Auth Providers → SCIM once an Owner has signed in.`
-					: `With these provided, Obot fetches each user's groups from ${provider.name} when they sign in. Leave both empty to provision users and groups through SCIM instead.`
+					? m.identity_access_auth_providers_scim_directory_empty({ name: provider.name })
+					: m.identity_access_auth_providers_scim_directory_provided({ name: provider.name })
 			};
 		}
 		return undefined;
@@ -481,7 +496,7 @@
 			providerConfigure?.close();
 			await refreshAuthProviders();
 			if (incoming.scimState) {
-				scimNotice = `${incoming.name} now serves sign-ins, and provisions users and groups through SCIM. Finish setting it up on Auth Providers → SCIM: generate the token and enter it in ${incoming.name}.`;
+				scimNotice = m.identity_access_auth_providers_scim_notice({ name: incoming.name });
 			}
 		} catch (err) {
 			confirmSwitch = false;
@@ -555,7 +570,7 @@
 		if (updatedMatch) {
 			handleClickConfigure(updatedMatch);
 		} else {
-			errors.append('There was an issue fetching the auth provider configuration.');
+			errors.append(m.identity_access_auth_providers_fetch_config_failed());
 		}
 
 		licenseRequiredProvider = undefined;
@@ -655,7 +670,7 @@
 					<Info class="mt-0.5 size-5 shrink-0" />
 					<p class="text-sm font-light">
 						{scimNotice}
-						<a class="text-link" href={resolve(SCIM_VIEW_PATH)}>Go to SCIM</a>
+						<a class="text-link" href={resolve(SCIM_VIEW_PATH)}>{m.identity_access_scim_go_to()}</a>
 					</p>
 				</div>
 			{/if}
@@ -663,11 +678,12 @@
 				<div class="notification-alert mb-4 flex flex-col gap-2">
 					<div class="flex items-center gap-2">
 						<TriangleAlert class="size-6 shrink-0 self-start text-warning" />
-						<p class="my-0.5 flex flex-col text-sm font-semibold">No Auth Providers Configured!</p>
+						<p class="my-0.5 flex flex-col text-sm font-semibold">
+							{m.identity_access_auth_providers_none_configured()}
+						</p>
 					</div>
 					<span class="text-sm font-light break-all">
-						To finish setting up Obot, you'll need to configure an Auth Provider. Select one below
-						to get started!
+						{m.identity_access_auth_providers_none_configured_description()}
 					</span>
 				</div>
 			{/if}
@@ -681,7 +697,7 @@
 							!!stagedProvider &&
 							!authProvider.staged)}
 					disableConfigureReason={switchNeedsOwner(authProvider)
-						? 'Only an owner can replace the auth provider everyone signs in with.'
+						? m.identity_access_auth_providers_only_owner_can_replace()
 						: undefined}
 					provider={authProvider}
 					staged={authProvider.staged}
@@ -699,13 +715,15 @@
 			{/each}
 		</div>
 	{:else}
-		<p class="text-muted-content text-sm font-light">Authentication is not enabled.</p>
+		<p class="text-muted-content text-sm font-light">
+			{m.identity_access_auth_providers_auth_not_enabled()}
+		</p>
 	{/if}
 </div>
 
 {#snippet switchSteps()}
 	{@const done = SWITCH_STEPS.indexOf(switchStep)}
-	<ol class="flex items-center gap-2 px-4 pb-4">
+	<ol class="flex items-center gap-2 px-4 pb-4 mt-4 md:mt-0">
 		{#each SWITCH_STEPS as step, index (step)}
 			{@const label = SWITCH_STEP_LABELS[step]}
 			{#if index > 0}
@@ -745,33 +763,42 @@
 	{/if}
 	{#if switchStep === 'signin'}
 		<p class="text-sm font-light">
-			Sign in with <b>{configuringAuthProvider?.name}</b> to confirm the connection works. The
-			account you use <b>becomes the owner of Obot</b> after the switch.
+			{m.identity_access_auth_providers_signin_prefix()}<b>{configuringAuthProvider?.name}</b
+			>{m.identity_access_auth_providers_signin_mid()}<b
+				>{m.identity_access_auth_providers_signin_bold()}</b
+			>{m.identity_access_auth_providers_signin_suffix()}
 		</p>
 		<div class="notification-info p-3 text-sm font-light">
-			{activeProvider?.name ?? 'The current provider'} keeps serving logins until you finish the switch.
-			You can come back to this step later.
+			{m.identity_access_auth_providers_keeps_serving({
+				provider:
+					activeProvider?.name ?? m.identity_access_auth_providers_current_provider_capitalized()
+			})}
 		</div>
 	{:else}
 		<div class="bg-base-200 flex items-center gap-3 rounded-lg p-3">
 			<div class="flex min-w-0 flex-col">
 				<span class="truncate text-sm font-medium">{switchVerifiedEmail}</span>
-				<span class="text-muted-content text-xs font-light"> Will own Obot after the switch </span>
+				<span class="text-muted-content text-xs font-light">
+					{m.identity_access_auth_providers_will_own()}
+				</span>
 			</div>
-			<span class="text-success ml-auto flex-none text-xs">Verified</span>
+			<span class="text-success ml-auto flex-none text-xs"
+				>{m.identity_access_auth_providers_verified()}</span
+			>
 		</div>
 		<p class="text-muted-content text-xs font-light">
-			Not the right account?
+			{m.identity_access_auth_providers_not_right_account()}
 			<button class="text-link underline" disabled={switching} onclick={handleVerifyStagedProvider}>
-				Sign in again
+				{m.identity_access_auth_providers_sign_in_again()}
 			</button>
 		</p>
 		<div class="notification-alert flex items-start gap-2 text-sm font-light">
 			<TriangleAlert class="mt-0.5 size-5 shrink-0 text-warning" />
 			<span>
-				{configuringAuthProvider?.name} becomes the only way to sign in, and
-				{activeProvider?.name ?? 'the current provider'} sessions end. Its users and their work will not
-				transfer.
+				{m.identity_access_auth_providers_switch_warning({
+					name: `${configuringAuthProvider?.name}`,
+					current: activeProvider?.name ?? m.identity_access_auth_providers_current_provider()
+				})}
 			</span>
 		</div>
 	{/if}
@@ -782,7 +809,10 @@
 		<IconButton
 			variant="danger"
 			disabled={switching}
-			tooltip={{ text: 'Discard staged switch', disablePortal: true }}
+			tooltip={{
+				text: m.identity_access_auth_providers_discard_staged_switch(),
+				disablePortal: true
+			}}
 			onclick={() => (confirmDiscardSwitch = true)}
 		>
 			<Trash2 class="size-5" />
@@ -791,24 +821,26 @@
 	<div class="grow"></div>
 	{#if switchStep === 'configure'}
 		<button class="btn" disabled={loading} onclick={() => providerConfigure?.close()}>
-			Cancel
+			{m.common_cancel()}
 		</button>
-		<button class="btn btn-primary" disabled={loading} onclick={submit}>Continue</button>
+		<button class="btn btn-primary" disabled={loading} onclick={submit}>{m.core_continue()}</button>
 	{:else if switchStep === 'signin'}
 		{#if !configurationLocked}
 			<button class="btn" disabled={switching} onclick={() => goToSwitchStep('configure')}>
-				<ArrowLeft class="size-4" /> Configuration
+				<ArrowLeft class="size-4" />
+				{m.identity_access_auth_providers_configuration()}
 			</button>
 		{/if}
 		<button class="btn btn-primary" disabled={switching} onclick={handleVerifyStagedProvider}>
-			Sign in with {configuringAuthProvider?.name}
+			{m.identity_access_auth_providers_sign_in_with({ name: `${configuringAuthProvider?.name}` })}
 		</button>
 	{:else}
 		<button class="btn" disabled={switching} onclick={() => goToSwitchStep('signin')}>
-			<ArrowLeft class="size-4" /> Sign in
+			<ArrowLeft class="size-4" />
+			{m.identity_access_auth_providers_step_signin()}
 		</button>
 		<button class="btn btn-primary" disabled={switching} onclick={() => (confirmSwitch = true)}>
-			Switch to {configuringAuthProvider?.name}
+			{m.identity_access_auth_providers_switch_to({ name: `${configuringAuthProvider?.name}` })}
 		</button>
 	{/if}
 {/snippet}
@@ -822,7 +854,9 @@
 	error={configureError}
 	readonly={profile.current.isAdminReadonly?.()}
 	parameterNotice={scimParameterNotice}
-	title={isSwitching ? `Switch to ${configuringAuthProvider?.name}` : undefined}
+	title={isSwitching
+		? m.identity_access_auth_providers_switch_to({ name: `${configuringAuthProvider?.name}` })
+		: undefined}
 	steps={isSwitching ? switchSteps : undefined}
 	body={isSwitching && switchStep !== 'configure' ? switchBody : undefined}
 	footer={isSwitching ? switchFooter : undefined}
@@ -833,21 +867,21 @@
 			<div class="notification-alert flex flex-col gap-2 p-3 text-sm font-light" role="alert">
 				{#if residualCleanupStarted}
 					<p>
-						The cleanup of {residualProvider.name}'s leftover group data has started. Confirm again
-						once it finishes.
+						{m.identity_access_auth_providers_scim_cleanup_started({
+							name: residualProvider.name
+						})}
 					</p>
 				{:else}
 					<p>
-						{residualProvider.name} still has groups, or references to them, from an earlier configuration.
-						Remove them to provision users and groups through SCIM. This runs the cleanup that deconfiguring
-						{residualProvider.name} runs, which deletes its groups and memberships, and removes its groups
-						from roles and policies. Alternatively, provide the directory credentials to fetch groups
-						at sign-in.
+						{m.identity_access_auth_providers_scim_still_has_groups({
+							name: residualProvider.name
+						})}
 					</p>
 					{#if residualProvider.staged}
 						<p>
-							{residualProvider.name} is staged as a replacement. Discard the staged switch first, then
-							remove the leftover group data.
+							{m.identity_access_auth_providers_scim_residual_staged({
+								name: residualProvider.name
+							})}
 						</p>
 					{:else}
 						<div>
@@ -857,7 +891,7 @@
 								disabled={residualCleanupLoading || isReadonly}
 								onclick={() => (confirmResidualCleanup = true)}
 							>
-								Remove leftover group data
+								{m.identity_access_auth_providers_scim_residual_title()}
 							</button>
 						</div>
 					{/if}
@@ -869,7 +903,7 @@
 			<div class="flex items-center gap-3">
 				<Info class="size-6" />
 				<p class="flex flex-wrap items-center gap-2">
-					Note: the callback URL for this auth provider is
+					{m.identity_access_auth_providers_callback_note()}
 					<CopyButton
 						showTextLeft
 						buttonText={callbackUrl}
@@ -884,12 +918,12 @@
 		</div>
 		{#if documentationUrl}
 			<div class="notification-info p-3 text-xs font-light">
-				For more details, please review <a
+				{m.identity_access_auth_providers_docs_prefix()}<a
 					class="text-link"
 					href={documentationUrl}
 					rel="external noopener noreferrer"
-					target="_blank">the documentation</a
-				> for configuring this auth provider.
+					target="_blank">{m.identity_access_auth_providers_docs_link()}</a
+				>{m.identity_access_auth_providers_docs_suffix()}
 			</div>
 		{/if}
 	{/snippet}
@@ -910,11 +944,15 @@
 
 <Confirm
 	show={confirmSwitch}
-	title="Complete switch"
-	msg="Switch to {configuringAuthProvider?.name}?"
+	title={m.identity_access_auth_providers_complete_switch()}
+	msg={m.identity_access_auth_providers_switch_to_question({
+		name: `${configuringAuthProvider?.name}`
+	})}
+	submitText={m.identity_access_auth_providers_switch_to({
+		name: `${configuringAuthProvider?.name}`
+	})}
 	note={switchNote}
-	submitText="Switch to {configuringAuthProvider?.name}"
-	cancelText="Cancel"
+	cancelText={m.common_cancel()}
 	loading={switching}
 	onsuccess={handleActivateStagedProvider}
 	oncancel={() => (confirmSwitch = false)}
@@ -922,13 +960,23 @@
 
 <Confirm
 	show={confirmDiscardSwitch}
-	title="Discard switch"
-	msg="Discard the switch to {configuringAuthProvider?.name}?"
+	title={m.identity_access_auth_providers_discard_switch()}
+	msg={m.identity_access_auth_providers_discard_switch_question({
+		name: `${configuringAuthProvider?.name}`
+	})}
 	note={signedInAsVerifiedAccount
-		? `You are signed in with ${configuringAuthProvider?.name} as ${switchVerifiedEmail}, so this signs you out. The staged settings are removed and ${activeProvider?.name ?? 'the current provider'} keeps serving logins.`
-		: `The staged ${configuringAuthProvider?.name} settings are removed. ${activeProvider?.name ?? 'The current provider'} keeps serving logins either way.`}
-	submitText="Discard switch"
-	cancelText="Keep editing"
+		? m.identity_access_auth_providers_discard_note_signed_in({
+				name: `${configuringAuthProvider?.name}`,
+				email: `${switchVerifiedEmail}`,
+				current: activeProvider?.name ?? m.identity_access_auth_providers_current_provider()
+			})
+		: m.identity_access_auth_providers_discard_note({
+				name: `${configuringAuthProvider?.name}`,
+				current:
+					activeProvider?.name ?? m.identity_access_auth_providers_current_provider_capitalized()
+			})}
+	submitText={m.identity_access_auth_providers_discard_switch()}
+	cancelText={m.identity_access_auth_providers_keep_editing()}
 	loading={switching}
 	onsuccess={handleUnstageProvider}
 	oncancel={() => (confirmDiscardSwitch = false)}
@@ -936,12 +984,14 @@
 
 <Confirm
 	show={confirmResidualCleanup}
-	title="Remove leftover group data"
-	msg="Remove {residualProvider?.name}'s leftover group data?"
+	title={m.identity_access_auth_providers_scim_residual_title()}
+	msg={m.identity_access_auth_providers_scim_residual_msg({
+		name: residualProvider?.name ?? ''
+	})}
 	note={residualCleanupNote}
 	classes={{ note: 'text-left' }}
-	submitText="Remove group data"
-	cancelText="Cancel"
+	submitText={m.identity_access_auth_providers_scim_residual_submit()}
+	cancelText={m.common_cancel()}
 	loading={residualCleanupLoading}
 	onsuccess={handleRemoveResidualGroupData}
 	oncancel={() => (confirmResidualCleanup = false)}
@@ -952,8 +1002,9 @@
 		<p>{residualCleanupSummary}</p>
 		{#if referencedResidualGroups.length > 0}
 			<p>
-				It also removes these groups from the roles and policies that reference them. Groups that
-				{residualProvider?.name} pushes through SCIM later will not regain them.
+				{m.identity_access_auth_providers_scim_residual_also({
+					name: residualProvider?.name ?? ''
+				})}
 			</p>
 			<ul class="flex max-h-48 list-disc flex-col gap-1 overflow-y-auto pl-5">
 				{#each referencedResidualGroups as group (group.id)}
@@ -980,7 +1031,9 @@
 
 <ResponsiveDialog bind:this={setupSignInDialog} class="w-md">
 	{#snippet titleContent()}
-		<h3 class="text-lg font-semibold">Next Step: Owner Setup</h3>
+		<h3 class="text-lg font-semibold">
+			{m.identity_access_auth_providers_next_step_owner_setup()}
+		</h3>
 	{/snippet}
 
 	<OwnerSetupPrompt
@@ -1000,5 +1053,5 @@
 	licenseKey={license.current.licenseKey}
 	endpoint={AdminService.createCommunityLicense}
 	onSubmit={handleCommunitySubmit}
-	signUpMessage="Register to get free access to all additional providers supported by Obot."
+	signUpMessage={m.identity_access_auth_providers_signup_message()}
 />

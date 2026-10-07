@@ -6,8 +6,13 @@
 	import Search from '$lib/components/Search.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
 	import Table from '$lib/components/table/Table.svelte';
+	import { m } from '$lib/i18n';
 	import { NanobotService, type OrgUser } from '$lib/services';
-	import { getMcpServerDeploymentStatus } from '$lib/services/user/mcp';
+	import {
+		getMcpServerDeploymentStatus,
+		getMcpValueLabel,
+		mcpTableDisplayValue
+	} from '$lib/services/user/mcp';
 	import { profile, version } from '$lib/stores';
 	import { formatTimeAgo } from '$lib/time';
 	import { goto } from '$lib/url';
@@ -59,12 +64,11 @@
 	}
 </script>
 
-<Layout title="Agents">
+<Layout title={m.identity_access_agents_tab()}>
 	<div class="flex flex-col gap-4">
 		<div class="flex items-center justify-between">
 			<p class="text-sm text-muted-content">
-				Browse and connect to agents across all users. Clicking "Connect" will open the agent's chat
-				interface in a new tab.
+				{m.identity_access_agents_browse_description()}
 			</p>
 		</div>
 
@@ -80,7 +84,7 @@
 				}
 				goto(currentUrl, { replaceState: true, keepFocus: true });
 			}}
-			placeholder="Search by owner..."
+			placeholder={m.identity_access_agents_search_owner()}
 		/>
 
 		<Table
@@ -93,12 +97,14 @@
 			]}
 			filterable={['ownerDisplay', 'deploymentStatus', 'updatesAvailable']}
 			headers={[
-				{ title: 'Owner', property: 'ownerDisplay' },
-				{ title: 'Health', property: 'deploymentStatus' },
-				{ title: 'Update Status', property: 'updatesAvailable' }
+				{ title: m.core_role_owner(), property: 'ownerDisplay' },
+				{ title: m.identity_access_agents_col_health(), property: 'deploymentStatus' },
+				{ title: m.core_col_update_status(), property: 'updatesAvailable' },
+				{ title: m.core_col_created(), property: 'created' }
 			]}
 			sortable={['ownerDisplay', 'deploymentStatus', 'updatesAvailable', 'created']}
-			noDataMessage="No agents found."
+			displayValue={mcpTableDisplayValue}
+			noDataMessage={m.identity_access_agents_none_found()}
 			onClickRow={(agent, isCtrlClick) => {
 				openUrl(`/admin/agents/p/${agent.projectID}/s/${agent.id}/details`, isCtrlClick);
 			}}
@@ -110,10 +116,10 @@
 					<div
 						use:tooltip={{ text: d.updateStatusTooltip ?? '', classes: ['whitespace-pre-line'] }}
 					>
-						{d.updateStatus || '--'}
+						{getMcpValueLabel(d.updateStatus) || '--'}
 					</div>
 				{:else if property === 'deploymentStatus'}
-					{d.deploymentStatus || '--'}
+					{getMcpValueLabel(d.deploymentStatus) || '--'}
 				{:else}
 					{d[property as keyof typeof d]}
 				{/if}
@@ -131,10 +137,10 @@
 					tooltip={{
 						text:
 							profile.current.canImpersonate?.() && agent.userID !== profile.current.id
-								? `Impersonate ${agent.ownerDisplay}`
+								? m.identity_access_agents_impersonate_named({ name: agent.ownerDisplay })
 								: agent.userID === profile.current.id
-									? 'You cannot impersonate yourself.'
-									: 'You do not have permission to impersonate other users.'
+									? m.identity_access_agents_cannot_impersonate_self()
+									: m.identity_access_agents_no_impersonate_permission()
 					}}
 				>
 					<HatGlasses class="size-4" />
@@ -149,20 +155,23 @@
 	oncancel={() => (confirmImpersonate = null)}
 	onsuccess={() => impersonate(confirmImpersonate?.agent)}
 	type="info"
-	title="Confirm Agent Connection"
-	msg={`Connect as ${confirmImpersonate?.userDisplayName || 'user'}?`}
+	title={m.identity_access_agents_confirm_connection()}
+	msg={m.identity_access_agents_connect_as({
+		name: confirmImpersonate?.userDisplayName || m.identity_access_agents_user_fallback()
+	})}
 	loading={Boolean(launchingAgentId)}
 >
 	{#snippet note()}
 		<p>
-			This will allow you to connect to the agent, impersonating as <b class="font-semibold"
-				>{confirmImpersonate?.userDisplayName || 'user'}</b
-			>. Any actions you take will be attributed to this user. Are you sure you wish to continue?
+			{m.identity_access_agents_impersonate_note_prefix()}
+			<b class="font-semibold"
+				>{confirmImpersonate?.userDisplayName || m.identity_access_agents_user_fallback()}</b
+			>{m.identity_access_agents_impersonate_note_suffix()}
 		</p>
-		<p class="text-muted-content mt-4 text-sm">Note: This will open in a new window.</p>
+		<p class="text-muted-content mt-4 text-sm">{m.identity_access_agents_new_window_note()}</p>
 	{/snippet}
 </Confirm>
 
 <svelte:head>
-	<title>Obot | Agents</title>
+	<title>Obot | {m.identity_access_agents_tab()}</title>
 </svelte:head>

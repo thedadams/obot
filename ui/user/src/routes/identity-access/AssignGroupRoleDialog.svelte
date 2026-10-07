@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
+	import { m } from '$lib/i18n';
 	import Loading from '$lib/icons/Loading.svelte';
 	import { Role } from '$lib/services/admin/types';
 	import { getUserRoleLabel } from '$lib/utils';
@@ -139,7 +140,9 @@
 	{#snippet titleContent()}
 		<div class="flex w-full flex-col gap-3">
 			<span class="block text-center text-lg font-semibold md:text-start md:text-xl">
-				{groupAssignment?.assignment.role ? 'Update' : 'Assign'} Group Role
+				{groupAssignment?.assignment.role
+					? m.identity_access_groups_update_group_role()
+					: m.identity_access_groups_assign_group_role()}
 			</span>
 		</div>
 	{/snippet}
@@ -160,7 +163,9 @@
 					<span class="font-semibold">{groupAssignment.group.name}</span>
 				</div>
 				<div class="text-muted-content text-xs">
-					Current: {getUserRoleLabel(groupAssignment.assignment.role)}
+					{m.identity_access_groups_current_role({
+						role: getUserRoleLabel(groupAssignment.assignment.role)
+					})}
 				</div>
 			</div>
 		{/if}
@@ -174,7 +179,7 @@
 		</div>
 
 		<div class="mt-4 flex shrink-0 justify-end gap-2">
-			<button class="btn btn-secondary" onclick={handleClose}>Cancel</button>
+			<button class="btn btn-secondary" onclick={handleClose}>{m.common_cancel()}</button>
 			<button
 				class="btn btn-primary"
 				onclick={handleConfirm}
@@ -183,7 +188,7 @@
 				{#if loading}
 					<Loading class="size-4" />
 				{:else}
-					{groupAssignment.assignment.role ? 'Update' : 'Assign'}
+					{groupAssignment.assignment.role ? m.core_update() : m.identity_access_assign()}
 				{/if}
 			</button>
 		</div>

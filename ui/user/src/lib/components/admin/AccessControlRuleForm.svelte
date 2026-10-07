@@ -5,6 +5,7 @@
 		ADMIN_ALL_OPTION,
 		MCP_ACCESS_POLICY_FIELD_IDS
 	} from '$lib/constants';
+	import { m } from '$lib/i18n';
 	import Loading from '$lib/icons/Loading.svelte';
 	import {
 		AdminService,
@@ -17,7 +18,7 @@
 		type OrgGroup,
 		type MCPCatalogEntry
 	} from '$lib/services';
-	import { getUserRegistry } from '$lib/services/user/mcp';
+	import { getUserRegistry, getMcpValueLabel } from '$lib/services/user/mcp';
 	import { profile } from '$lib/stores';
 	import { goto } from '$lib/url';
 	import { getUserDisplayName } from '$lib/utils';
@@ -172,8 +173,8 @@
 
 			const allLabel = owner
 				? isMe
-					? 'Everything In My Registry'
-					: `Everything In ${owner}'s Registry`
+					? m.mcps_access_policies_everything_in_my_registry()
+					: m.mcps_access_policies_everything_in_owner_registry({ owner })
 				: all.label;
 
 			return {
@@ -207,7 +208,7 @@
 							{@const registry = getUserRegistry(initialAccessControlRule, usersMap)}
 							{#if registry}
 								<div class="dark:bg-base-300 bg-base-400 rounded-full px-3 py-1 text-xs">
-									{registry}
+									{getMcpValueLabel(registry)}
 								</div>
 							{/if}
 						{/if}
@@ -216,7 +217,7 @@
 				{#if !readonly}
 					<IconButton
 						variant="danger2"
-						tooltip={{ text: 'Delete Catalog' }}
+						tooltip={{ text: m.mcps_access_policies_delete_catalog() }}
 						onclick={() => {
 							deletingRule = true;
 						}}
@@ -237,7 +238,7 @@
 							for={MCP_ACCESS_POLICY_FIELD_IDS.name}
 							class="flex-1 text-sm font-light capitalize"
 						>
-							Name
+							{m.core_name()}
 						</label>
 						<input
 							id={MCP_ACCESS_POLICY_FIELD_IDS.name}
@@ -252,7 +253,7 @@
 
 		<div id={MCP_ACCESS_POLICY_FIELD_IDS.usersGroupsSection} class="flex flex-col gap-2">
 			<div class="mb-2 flex items-center justify-between">
-				<h2 class="text-lg font-semibold">User & Groups</h2>
+				<h2 class="text-lg font-semibold">{m.mcps_access_policies_users_groups()}</h2>
 				{#if !readonly}
 					<div class="relative flex items-center gap-4">
 						{#if loadingUsersAndGroups}
@@ -261,7 +262,8 @@
 								class="btn btn-primary flex items-center gap-1 text-sm"
 								disabled
 							>
-								<Plus class="size-4" /> Add User/Group
+								<Plus class="size-4" />
+								{m.core_add_user_group()}
 							</button>
 						{:else}
 							<button
@@ -271,7 +273,8 @@
 									addUserGroupDialog?.open();
 								}}
 							>
-								<Plus class="size-4" /> Add User/Group
+								<Plus class="size-4" />
+								{m.core_add_user_group()}
 							</button>
 						{/if}
 					</div>
@@ -290,8 +293,11 @@
 				<Table
 					data={tableData}
 					fields={['displayName', 'type']}
-					headers={[{ property: 'displayName', title: 'Name' }]}
-					noDataMessage="No users or groups added."
+					headers={[
+						{ property: 'displayName', title: m.core_name() },
+						{ property: 'type', title: m.core_type() }
+					]}
+					noDataMessage={m.core_no_users_or_groups_added()}
 				>
 					{#snippet actions(d)}
 						{#if !readonly}
@@ -302,7 +308,7 @@
 										(subject) => resolveSubjectPickerById(subject) !== d.id
 									);
 								}}
-								tooltip={{ text: 'Delete User/Group' }}
+								tooltip={{ text: m.core_delete_user_group() }}
 							>
 								<Trash2 class="size-4" />
 							</IconButton>
@@ -314,7 +320,7 @@
 
 		<div id={MCP_ACCESS_POLICY_FIELD_IDS.serversSection} class="flex flex-col gap-2">
 			<div class="mb-2 flex items-center justify-between">
-				<h2 class="text-lg font-semibold">Servers</h2>
+				<h2 class="text-lg font-semibold">{m.mcps_servers_tab()}</h2>
 				{#if !readonly}
 					<div class="relative flex items-center gap-4">
 						<button
@@ -324,7 +330,8 @@
 								addMcpServerDialog?.open();
 							}}
 						>
-							<Plus class="size-4" /> Add Server
+							<Plus class="size-4" />
+							{m.mcps_access_policies_add_server()}
 						</button>
 					</div>
 				{/if}
@@ -332,7 +339,8 @@
 			<Table
 				data={mcpServersTableData}
 				fields={['name']}
-				noDataMessage="No entries or servers added."
+				noDataMessage={m.mcps_access_policies_no_entries_servers()}
+				headers={[{ property: 'name', title: m.core_name() }]}
 			>
 				{#snippet actions(d)}
 					{#if !readonly}
@@ -342,7 +350,7 @@
 								accessControlRule.resources =
 									accessControlRule.resources?.filter((resource) => resource.id !== d.id) ?? [];
 							}}
-							tooltip={{ text: 'Remove MCP Server' }}
+							tooltip={{ text: m.mcps_filters_remove_mcp_server() }}
 						>
 							<Trash2 class="size-4" />
 						</IconButton>
@@ -369,7 +377,7 @@
 							}
 						}}
 					>
-						Cancel
+						{m.common_cancel()}
 					</button>
 					<button
 						id={MCP_ACCESS_POLICY_FIELD_IDS.saveBtn}
@@ -390,7 +398,7 @@
 						{#if saving}
 							<Loading class="size-4" />
 						{:else}
-							Save
+							{m.core_save()}
 						{/if}
 					</button>
 				{:else}
@@ -407,7 +415,7 @@
 							saving = false;
 						}}
 					>
-						Reset
+						{m.core_reset_shared()}
 					</button>
 					<button
 						class="btn btn-primary"
@@ -434,7 +442,7 @@
 						{#if saving}
 							<Loading class="size-4" />
 						{:else}
-							Update
+							{m.core_update()}
 						{/if}
 					</button>
 				{/if}
@@ -491,7 +499,7 @@
 />
 
 <Confirm
-	msg={`Delete ${accessControlRule.displayName}?`}
+	msg={m.core_delete_named_form({ name: accessControlRule.displayName })}
 	show={deletingRule}
 	onsuccess={async () => {
 		if (!accessControlRule.id || !id) return;

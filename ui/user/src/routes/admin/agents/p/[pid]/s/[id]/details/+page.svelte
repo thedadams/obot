@@ -4,6 +4,7 @@
 	import Layout from '$lib/components/Layout.svelte';
 	import McpServerDetails from '$lib/components/mcp/McpServerDetails.svelte';
 	import { DEFAULT_MCP_CATALOG_ID, PAGE_TRANSITION_DURATION } from '$lib/constants';
+	import { m } from '$lib/i18n';
 	import Loading from '$lib/icons/Loading.svelte';
 	import { NanobotService, UserService, type OrgUser } from '$lib/services';
 	import { profile } from '$lib/stores';
@@ -29,7 +30,11 @@
 	});
 	let user = $derived(mcpServer?.userID ? usersMap.get(mcpServer.userID) : undefined);
 	let userDisplayName = $derived(getUserDisplayName(usersMap, mcpServer?.userID ?? ''));
-	let title = $derived(userDisplayName ? `${userDisplayName}'s Agent` : 'Agent Details');
+	let title = $derived(
+		userDisplayName
+			? m.identity_access_agents_owner_agent({ name: userDisplayName })
+			: m.identity_access_agents_details()
+	);
 
 	async function impersonate() {
 		if (!agent) return;
@@ -54,11 +59,15 @@
 			use:tooltip={profile.current.canImpersonate?.() && agent?.userID !== profile.current.id
 				? undefined
 				: agent?.userID === profile.current.id
-					? { text: 'You cannot impersonate yourself.', disablePortal: true }
-					: { text: 'You do not have permission to impersonate other users.', disablePortal: true }}
+					? { text: m.identity_access_agents_cannot_impersonate_self(), disablePortal: true }
+					: {
+							text: m.identity_access_agents_no_impersonate_permission(),
+							disablePortal: true
+						}}
 			disabled={!profile.current.canImpersonate?.() || agent?.userID === profile.current.id}
 		>
-			<HatGlasses class="size-4" /> Connect as User
+			<HatGlasses class="size-4" />
+			{m.identity_access_agents_connect_as_user()}
 		</button>
 	{/snippet}
 
@@ -77,7 +86,7 @@
 						connectedUsers={user ? [user] : []}
 						readonly={profile.current.isAdminReadonly?.()}
 						k8sOverrides={{
-							title: 'Details',
+							title: m.chat_details(),
 							classes: {
 								title: 'text-lg font-semibold'
 							}
@@ -94,18 +103,18 @@
 	oncancel={() => (confirmImpersonate = false)}
 	onsuccess={impersonate}
 	type="info"
-	title="Confirm Agent Connection"
-	msg={`Connect as ${userDisplayName}?`}
+	title={m.identity_access_agents_confirm_connection()}
+	msg={m.identity_access_agents_connect_as({ name: userDisplayName })}
 	loading={Boolean(launchingAgentId)}
 >
 	{#snippet note()}
 		<p>
-			This will allow you to connect to the agent, impersonating as <b class="font-semibold"
-				>{userDisplayName}</b
-			>. Any actions you take will be attributed to this user. Are you sure you wish to continue?
+			{m.identity_access_agents_impersonate_note_prefix()}
+			<b class="font-semibold">{userDisplayName}</b
+			>{m.identity_access_agents_impersonate_note_suffix()}
 		</p>
 
-		<p class="text-muted-content mt-4 text-sm">Note: This will open in a new window.</p>
+		<p class="text-muted-content mt-4 text-sm">{m.identity_access_agents_new_window_note()}</p>
 	{/snippet}
 </Confirm>
 

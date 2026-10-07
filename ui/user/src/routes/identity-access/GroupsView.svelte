@@ -5,6 +5,7 @@
 	import Search from '$lib/components/Search.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants.js';
+	import { m } from '$lib/i18n';
 	import { Group, Role, type GroupRoleAssignment } from '$lib/services/admin/types';
 	import { AdminService, UserService, type OrgGroup } from '$lib/services/index.js';
 	import { profile } from '$lib/stores/index.js';
@@ -166,7 +167,7 @@
 				class="dark:bg-base-200 dark:border-base-400 bg-base-100 border border-transparent shadow-sm"
 				value={query}
 				onChange={updateQuery}
-				placeholder="Search by group name..."
+				placeholder={m.identity_access_groups_search_placeholder()}
 			/>
 			<div class="groups-table">
 				<Table
@@ -177,7 +178,10 @@
 					onFilter={setFilterUrlParams}
 					onClearAllFilters={clearUrlParams}
 					sortable={['name', 'role']}
-					headers={[{ property: 'name', title: 'Name' }]}
+					headers={[
+						{ property: 'name', title: m.core_name() },
+						{ property: 'role', title: m.identity_access_col_role() }
+					]}
 					{initSort}
 					onSort={setSortUrlParams}
 				>
@@ -203,7 +207,7 @@
 									});
 								}}
 							>
-								View Access Policies
+								{m.identity_access_view_access_policies()}
 							</button>
 							{#if !isAdminReadonly}
 								<button
@@ -215,7 +219,7 @@
 										showAssignGroupRoleDialog = true;
 									}}
 								>
-									{d.assignment ? 'Update Role' : 'Assign Role'}
+									{d.assignment ? m.identity_access_update_role() : m.identity_access_assign_role()}
 								</button>
 								{#if d.assignment}
 									<button
@@ -224,7 +228,7 @@
 											d.roleId === Role.OWNER}
 										onclick={() => (deletingGroup = d)}
 									>
-										Remove Role Assignment
+										{m.identity_access_groups_remove_role_assignment()}
 									</button>
 								{/if}
 							{/if}
@@ -239,8 +243,8 @@
 <CurrentAccessDialog bind:this={currentAccessDialog} />
 
 <Confirm
-	title="Confirm Role Removal"
-	msg={`Remove role assignment for group "${deletingGroup?.name}"?`}
+	title={m.identity_access_groups_confirm_role_removal()}
+	msg={m.identity_access_groups_remove_role_assignment_msg({ name: `${deletingGroup?.name}` })}
 	show={Boolean(deletingGroup)}
 	onsuccess={async () => {
 		if (!deletingGroup) return;
@@ -257,8 +261,7 @@
 	oncancel={() => (deletingGroup = undefined)}
 >
 	{#snippet note()}
-		Related permissions tied to the role will no longer be available. Are you sure you wish to
-		continue?
+		{m.identity_access_groups_remove_role_assignment_note()}
 	{/snippet}
 </Confirm>
 

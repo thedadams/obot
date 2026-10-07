@@ -1,4 +1,5 @@
 import { handleRouteError } from '$lib/errors';
+import { m } from '$lib/i18n';
 import { NanobotService } from '$lib/services';
 import type { ProjectV2Agent } from '$lib/services/nanobot/types';
 import type { LayoutLoad } from './$types';
@@ -10,7 +11,7 @@ export const load: LayoutLoad = async ({ fetch, url, parent }) => {
 	const { profile, version } = await parent();
 
 	if (version?.agentsEnabled === false) {
-		throw error(403, 'Obot Agent features are disabled.');
+		throw error(403, m.chat_agent_features_disabled());
 	}
 
 	// Check for an explicit project ID from query params or URL path.
@@ -41,7 +42,7 @@ export const load: LayoutLoad = async ({ fetch, url, parent }) => {
 		}
 
 		if (agent.userID !== profile.id && !profile.canImpersonate?.()) {
-			throw error(403, 'You do not have permission to view this agent.');
+			throw error(403, m.chat_no_permission_view_agent());
 		}
 
 		return { projects: [project], agent, isNewAgent: false };
@@ -54,7 +55,10 @@ export const load: LayoutLoad = async ({ fetch, url, parent }) => {
 	try {
 		projects = await NanobotService.listProjects({ fetch });
 		if (projects.length === 0) {
-			const project = await NanobotService.createProject({ displayName: 'New Project' }, { fetch });
+			const project = await NanobotService.createProject(
+				{ displayName: m.chat_new_project() },
+				{ fetch }
+			);
 			projects = [project];
 		}
 
@@ -62,7 +66,7 @@ export const load: LayoutLoad = async ({ fetch, url, parent }) => {
 		if (agents.length === 0) {
 			agent = await NanobotService.createProjectAgent(
 				projects[0].id,
-				{ displayName: 'New Agent' },
+				{ displayName: m.chat_new_agent() },
 				{ fetch }
 			);
 			isNewAgent = true;

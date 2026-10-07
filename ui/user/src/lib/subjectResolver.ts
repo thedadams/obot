@@ -1,3 +1,4 @@
+import { m } from '$lib/i18n';
 import {
 	Group,
 	UserService,
@@ -37,7 +38,7 @@ export function obotGroupDisplayName(id: string): string {
 export interface SubjectTableRow {
 	id: string;
 	displayName: string;
-	type: 'User' | 'Group' | 'Selector';
+	type: string;
 }
 
 export interface ResolvedSubjects {
@@ -115,7 +116,7 @@ export function convertSubjectsToTableData(
 					return {
 						id: subject.id,
 						displayName: getUserDisplayName(userMap, subject.id),
-						type: 'User'
+						type: m.core_col_user()
 					};
 				}
 
@@ -125,7 +126,7 @@ export function convertSubjectsToTableData(
 					return {
 						id: subject.id,
 						displayName: group?.name ?? subject.id,
-						type: 'Group'
+						type: m.core_col_group()
 					};
 				}
 
@@ -133,14 +134,14 @@ export function convertSubjectsToTableData(
 					return {
 						id: resolveSubjectPickerById(subject),
 						displayName: obotGroupDisplayName(subject.id),
-						type: 'Group'
+						type: m.core_col_group()
 					};
 				}
 
 				return {
 					id: subject.id,
-					displayName: subject.id === EVERYONE_SUBJECT_ID ? 'All Obot Users' : subject.id,
-					type: 'Selector'
+					displayName: subject.id === EVERYONE_SUBJECT_ID ? m.core_all_obot_users() : subject.id,
+					type: m.identity_access_users_selector()
 				};
 			})
 			.filter((subject): subject is SubjectTableRow => subject !== undefined) ?? []
