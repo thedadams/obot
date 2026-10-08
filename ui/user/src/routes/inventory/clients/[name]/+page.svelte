@@ -2,13 +2,14 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Layout from '$lib/components/Layout.svelte';
+	import SubjectName from '$lib/components/admin/SubjectName.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { PAGE_TRANSITION_DURATION } from '$lib/constants';
 	import { formatDeviceCommand } from '$lib/format.js';
 	import { m } from '$lib/i18n';
 	import type { DeviceClientFleetSummary } from '$lib/services';
 	import { goto } from '$lib/url';
-	import { openUrl } from '$lib/utils.js';
+	import { isDisabledUser, openUrl } from '$lib/utils.js';
 	import { CheckIcon, PencilRuler, Server, Users, XIcon } from '@lucide/svelte';
 	import { fly } from 'svelte/transition';
 
@@ -130,7 +131,10 @@
 					>
 						{#snippet onRenderColumn(property, d)}
 							{#if property === 'email'}
-								{d.displayName || d.email || '-'}
+								<SubjectName
+									name={d.displayName || d.email || '-'}
+									disabled={isDisabledUser(userMap.get(d.id))}
+								/>
 							{:else}
 								{d[property as keyof (typeof detail.users)[number]]}
 							{/if}

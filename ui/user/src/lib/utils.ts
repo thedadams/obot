@@ -288,6 +288,17 @@ export const getUserRoleLabel = (role: number) => {
 	return m.core_unknown() + withAuditor + withUserImpersonation;
 };
 
+// isDisabledUser reports whether a user is disabled: they keep their account, but cannot sign in or use
+// their credentials.
+export function isDisabledUser(user?: Pick<OrgUser, 'status'>): boolean {
+	return user?.status === 'disabled';
+}
+
+// withDisabledMarker marks a user's label when the user is disabled, for lists of users that show only text.
+export function withDisabledMarker(label: string, user?: Pick<OrgUser, 'status'>): string {
+	return isDisabledUser(user) ? m.core_user_disabled_label({ name: label }) : label;
+}
+
 /**
  * Generates a display name for a user with fallbacks and contextual information.
  *

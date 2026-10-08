@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import SubjectName from '$lib/components/admin/SubjectName.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import { m } from '$lib/i18n';
 	import type { MCPCatalogEntry, OrgUser, VMCP, VMCPInstance } from '$lib/services';
 	import { isDeprecatedMCPServer } from '$lib/services/user/mcp';
 	import { vmcpComponentId, vmcpInstanceAuditLogsPath } from '$lib/services/vmcps/utils';
 	import { mcpServersAndEntries, profile } from '$lib/stores';
-	import { getUserDisplayName, openUrl } from '$lib/utils';
+	import { getUserDisplayName, isDisabledUser, openUrl } from '$lib/utils';
 	import McpDeprecatedNotice from '../mcp/McpDeprecatedNotice.svelte';
 	import { ChevronRight, CircleAlert, Server } from '@lucide/svelte';
 
@@ -157,7 +158,7 @@
 		>
 			{#snippet onRenderColumn(property: string, d: OrgUser)}
 				{#if property === 'name'}
-					{getUserDisplayName(usersMap, d.id)}
+					<SubjectName name={getUserDisplayName(usersMap, d.id)} disabled={isDisabledUser(d)} />
 				{:else}
 					{d[property as keyof typeof d]}
 				{/if}

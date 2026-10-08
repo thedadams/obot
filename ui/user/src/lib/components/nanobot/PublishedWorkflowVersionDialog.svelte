@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SearchUsers from '$lib/components/admin/SearchUsers.svelte';
+	import SubjectName from '$lib/components/admin/SubjectName.svelte';
 	import { m } from '$lib/i18n';
 	import {
 		NanobotService,
@@ -15,7 +16,7 @@
 	import { responsive } from '$lib/stores';
 	import { resolveSubjectFromGroup, resolveSubjectPickerById } from '$lib/subjectResolver';
 	import { formatTimeAgo } from '$lib/time';
-	import { getUserDisplayName } from '$lib/utils';
+	import { getUserDisplayName, isDisabledUser } from '$lib/utils';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 	import { hasAllUsersSubject } from './publishedArtifactSubjects';
 	import { ChevronLeft, CircleAlert, Plus, Trash2 } from '@lucide/svelte';
@@ -269,7 +270,11 @@
 					class="border-base-300 flex items-center justify-between border-b px-3 py-2 last:border-b-0"
 				>
 					<div class="min-w-0">
-						<p class="truncate text-sm font-medium">{getSubjectDisplayName(subject)}</p>
+						<SubjectName
+							class="text-sm font-medium"
+							name={getSubjectDisplayName(subject)}
+							disabled={subject.type === 'user' && isDisabledUser(userMap.get(subject.id))}
+						/>
 						<p class="text-base-content/60 text-xs">{getSubjectType(subject)}</p>
 					</div>
 					<button
