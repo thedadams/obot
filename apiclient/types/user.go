@@ -11,7 +11,6 @@ package types
 //
 // Orthogonal roles:
 //   - RoleAuditor (32): Can view audit logs and sensitive data (can be combined with any base role)
-//   - RoleUserImpersonation (256): Can connect to other users' MCP servers (must be explicitly assigned)
 //
 // Examples of combined roles:
 //   - RoleAdmin | RoleAuditor (48): Admin with audit access
@@ -26,29 +25,26 @@ const (
 	RoleAuditor
 	RolePowerUserPlus
 	RolePowerUser
-	RoleUserImpersonation
 
 	RoleUnknown Role = 0
 
-	GroupOwner              = "owner"
-	GroupAdmin              = "admin"
-	GroupAuditor            = "auditor"
-	GroupUserImpersonation  = "user-impersonation"
-	GroupPowerUserPlus      = "power-user-plus"
-	GroupPowerUser          = "power-user"
-	GroupBasic              = "basic"
-	GroupAuthenticated      = "authenticated"
-	GroupMCP                = "mcp"
-	GroupCompositeMCP       = "composite-mcp"
-	GroupSkills             = "skills"
-	GroupPublishedArtifacts = "published-artifacts"
-	GroupAPI                = "api"
-	GroupLLM                = "llm"
-	GroupDeviceScans        = "device-scans"
-	GroupDeviceEnroll       = "device-enroll"
-	GroupTunnel             = "obot-tunnel"
-	GroupTunnelBridge       = "obot-tunnel-bridge"
-	GroupTunnelPeer         = "obot-tunnel-peer"
+	GroupOwner         = "owner"
+	GroupAdmin         = "admin"
+	GroupAuditor       = "auditor"
+	GroupPowerUserPlus = "power-user-plus"
+	GroupPowerUser     = "power-user"
+	GroupBasic         = "basic"
+	GroupAuthenticated = "authenticated"
+	GroupMCP           = "mcp"
+	GroupCompositeMCP  = "composite-mcp"
+	GroupSkills        = "skills"
+	GroupAPI           = "api"
+	GroupLLM           = "llm"
+	GroupDeviceScans   = "device-scans"
+	GroupDeviceEnroll  = "device-enroll"
+	GroupTunnel        = "obot-tunnel"
+	GroupTunnelBridge  = "obot-tunnel-bridge"
+	GroupTunnelPeer    = "obot-tunnel-peer"
 	// GroupSCIM is the group of a SCIM connection's principal, which may only use that connection's SCIM endpoint.
 	GroupSCIM = "obot-scim"
 )
@@ -132,21 +128,17 @@ func (u Role) IsExactBaseRole(role Role) bool {
 }
 
 func (u Role) SwitchBaseRole(role Role) Role {
-	return role | (u & (RoleAuditor | RoleUserImpersonation))
+	return role | (u & RoleAuditor)
 }
 
 // ExtractBaseRole removes orthogonal role flags to get the base role
 func (u Role) ExtractBaseRole() Role {
-	return u &^ (RoleAuditor | RoleUserImpersonation)
+	return u &^ RoleAuditor
 }
 
 // HasAuditorRole checks if the Auditor flag is set in the role
 func (u Role) HasAuditorRole() bool {
 	return u&RoleAuditor != 0
-}
-
-func (u Role) HasUserImpersonationRole() bool {
-	return u&RoleUserImpersonation != 0
 }
 
 func (u Role) RoleGroups() []string {
@@ -177,14 +169,11 @@ func (u Role) groups(onlyRoleGroups bool) []string {
 	if u.HasRole(RoleAuditor) {
 		groups = append(groups, GroupAuditor)
 	}
-	if u.HasRole(RoleUserImpersonation) {
-		groups = append(groups, GroupUserImpersonation)
-	}
 	if u != RoleUnknown {
 		groups = append(groups, GroupAuthenticated)
 
 		if !onlyRoleGroups {
-			groups = append(groups, GroupAPI, GroupLLM, GroupSkills, GroupPublishedArtifacts, GroupMCP, GroupDeviceScans)
+			groups = append(groups, GroupAPI, GroupLLM, GroupSkills, GroupMCP, GroupDeviceScans)
 		}
 	}
 

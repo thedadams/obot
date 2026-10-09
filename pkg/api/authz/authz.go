@@ -173,10 +173,6 @@ var (
 		"GET /api/admin-api-keys",
 		"GET /api/admin-api-keys/{id}",
 		"DELETE /api/admin-api-keys/{id}",
-
-		"/api/projects",
-		"/api/projects/",
-		"GET /api/nanobot-agents",
 	}
 	ownerRules = []string{
 		"POST /api/auth-providers/{id}/stage",
@@ -275,7 +271,6 @@ var (
 			"GET /api/mdm/assets",
 			"GET /api/token-usage",
 			"GET /api/total-token-usage",
-			"GET /api/nanobot-agents",
 		},
 		anyGroup: {
 			// Allow access to the oauth2 endpoints
@@ -347,10 +342,6 @@ var (
 			"GET /api/mcp-stats",
 			"GET /api/mcp-stats/{mcp_id}",
 
-			// Allow basic users to create and list projects
-			"POST /api/projects",
-			"GET /api/projects",
-
 			// API key management for user's own keys
 			"POST /api/api-keys",
 			"GET /api/api-keys",
@@ -395,13 +386,6 @@ var (
 		types.GroupSkills: {
 			// Skill discovery and download are filtered in the handler.
 			"GET /api/skills",
-		},
-
-		types.GroupPublishedArtifacts: {
-			// Published artifacts — any authenticated user can publish and search.
-			// Artifact-specific access is enforced by resource authorization.
-			"POST   /api/published-artifacts",
-			"GET    /api/published-artifacts",
 		},
 
 		types.GroupLLM: {
