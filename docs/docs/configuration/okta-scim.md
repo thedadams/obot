@@ -247,8 +247,7 @@ until you update the token in Okta.
 ### Retry failed changes
 
 If Obot can't apply a change from Okta, for example because Obot was
-unavailable, Okta may not retry it automatically. The **Activity** section of
-the Obot SCIM page lists recent failures.
+unavailable, Okta may not retry it automatically.
 
 - **Deactivations:** In Okta, go to **Dashboard > Tasks > Application accounts
   need deprovisioning** and select **Retry Selected**. Don't select **Mark
@@ -257,10 +256,12 @@ the Obot SCIM page lists recent failures.
 - **Group changes:** In the SCIM app's **Push Groups** tab, select **Retry All
   Groups**.
 
+If Okta sends a SCIM payload that Obot deems invalid, the failure will
+appear in the **Activity** section on the SCIM configuration page in Obot.
+
 ## Stop using SCIM
 
-Deconfiguring the Okta auth provider, or switching to another auth provider,
-removes the SCIM setup:
+Switching to another auth provider removes the SCIM setup:
 
 - Okta groups, their memberships, and their role assignments are deleted, and
   the groups are removed from access policies.
@@ -269,6 +270,6 @@ removes the SCIM setup:
 - Requests from the SCIM app fail. Turn off provisioning in the SCIM app in
   Okta, or delete the app.
 
-To go back to fetching groups at sign-in, configure Okta again with the **API
-Services Client ID** and **API Services Private Key**. To use SCIM again later,
-start over with a new token.
+To go back to fetching groups at sign-in, temporarily switch to the Local auth provider,
+then configure Okta again with the **API Services Client ID** and **API Services Private Key**.
+To use SCIM again later, start over with a new token.
