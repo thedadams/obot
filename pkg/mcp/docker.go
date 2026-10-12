@@ -52,6 +52,8 @@ type dockerBackend struct {
 	httpListenPort         int
 	hostBaseURLWithPort    string
 	containerizedBaseImage string
+	openAPIImage           string
+	validationOptions      ValidationOptions
 	authEnabled            bool
 	deploymentCacheMu      sync.RWMutex
 	deploymentCache        map[string]*dockerDeploymentCacheEntry
@@ -66,7 +68,7 @@ type dockerDeploymentCacheEntry struct {
 	containerIDs map[string]string
 }
 
-func newDockerBackend(ctx context.Context, authEnabled bool, exposedPort int, opts Options) (backend, error) {
+func newDockerBackend(ctx context.Context, authEnabled bool, exposedPort int, opts Options, validationOptions ValidationOptions) (backend, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker client: %w", err)
@@ -84,6 +86,8 @@ func newDockerBackend(ctx context.Context, authEnabled bool, exposedPort int, op
 		httpListenPort:         exposedPort,
 		hostBaseURLWithPort:    "http://" + fmt.Sprintf("%s:%d", host, exposedPort),
 		containerizedBaseImage: opts.MCPBaseImage,
+		openAPIImage:           opts.MCPOpenAPIImage,
+		validationOptions:      validationOptions,
 		authEnabled:            authEnabled,
 		deploymentCache:        map[string]*dockerDeploymentCacheEntry{},
 		syncedFilesHash:        map[string]string{},
@@ -324,6 +328,9 @@ func (d *dockerBackend) ensureDeployment(ctx context.Context, server ServerConfi
 		switch existing.State {
 		case container.StateCreated:
 			// Container exists and is created, start it and wait for it to be ready.
+			if err := validateDeployment(ctx, server, d.validationOptions); err != nil {
+				return ServerConfig{}, err
+			}
 			if err := d.client.ContainerStart(ctx, existing.ID, container.StartOptions{}); err != nil {
 				return ServerConfig{}, fmt.Errorf("failed to start container: %w", err)
 			}
@@ -349,7 +356,7 @@ func (d *dockerBackend) ensureDeployment(ctx context.Context, server ServerConfi
 			}
 
 			containerPort := defaultContainerPort
-			if server.Runtime == otypes.RuntimeContainerized && server.ContainerPort != 0 {
+			if isHTTPContainerRuntime(server.Runtime) && server.ContainerPort != 0 {
 				containerPort = server.ContainerPort
 			}
 
@@ -360,6 +367,9 @@ func (d *dockerBackend) ensureDeployment(ctx context.Context, server ServerConfi
 			return d.buildServerConfig(server, existing, containerPort, containerEnv)
 		default:
 			// Container exists but not running, remove it and recreate
+			if err := validateDeployment(ctx, server, d.validationOptions); err != nil {
+				return ServerConfig{}, err
+			}
 			if err := d.client.ContainerRemove(ctx, existing.ID, container.RemoveOptions{Force: true}); cerrdefs.IsConflict(err) {
 				// The container is already being removed, wait for it to finish
 				statusCh, errCh := d.client.ContainerWait(ctx, existing.ID, container.WaitConditionRemoved)
@@ -375,6 +385,8 @@ func (d *dockerBackend) ensureDeployment(ctx context.Context, server ServerConfi
 				return ServerConfig{}, fmt.Errorf("failed to remove stopped container: %w", err)
 			}
 		}
+	} else if err := validateDeployment(ctx, server, d.validationOptions); err != nil {
+		return ServerConfig{}, err
 	}
 
 	// Create new container
@@ -385,6 +397,8 @@ func (d *dockerBackend) deploymentImage(server ServerConfig) string {
 	switch server.Runtime {
 	case otypes.RuntimeUVX, otypes.RuntimeNPX:
 		return d.containerizedBaseImage
+	case otypes.RuntimeOpenAPI:
+		return d.openAPIImage
 	default:
 		return ""
 	}
@@ -864,6 +878,7 @@ func (d *dockerBackend) buildServerConfig(server ServerConfig, c *container.Summ
 		AuditLogMetadata:        server.AuditLogMetadata,
 		ContainerPath:           server.ContainerPath,
 		PassthroughHeaderNames:  server.PassthroughHeaderNames,
+		Headers:                 server.hostedConnectionHeaders(),
 		PassthroughHeaderValues: server.PassthroughHeaderValues,
 		StartupTimeout:          server.StartupTimeout,
 		Webhooks:                server.Webhooks,
@@ -957,6 +972,9 @@ func (d *dockerBackend) createAndStartContainer(ctx context.Context, server Serv
 
 		cmd = []string{"--listen", fmt.Sprintf(":%d", defaultContainerPort), "--config", "/config/mmmcp.yaml"}
 
+	case otypes.RuntimeOpenAPI:
+		server.ContainerImage = d.openAPIImage
+		fallthrough
 	case otypes.RuntimeContainerized:
 		// Use specified container image or base image
 		if server.ContainerImage == "" {
