@@ -2,7 +2,9 @@
 	import { page } from '$app/state';
 	import Layout from '$lib/components/Layout.svelte';
 	import IconButton from '$lib/components/primitives/IconButton.svelte';
-	import CreateEditVMcp from '$lib/components/vmcps/CreateEditVMcp.svelte';
+	import CreateEditVMcp, {
+		type VMcpCreateDraft
+	} from '$lib/components/vmcps/CreateEditVMcp.svelte';
 	import CreateVMcpButton from '$lib/components/vmcps/CreateVMcpButton.svelte';
 	import McpServersSidebar from '$lib/components/vmcps/McpServersSidebar.svelte';
 	import VMcpActions from '$lib/components/vmcps/VMcpActions.svelte';
@@ -46,6 +48,7 @@
 		appendComponentLabel,
 		catalogConfigurationFields,
 		catalogEntryToVMCPComponent,
+		configurationRetainingOmittedRequired,
 		isCatalogSyncedVMcp,
 		mcpServerNeedsStaticOAuthConfiguration,
 		resolveVMcpComponents,
@@ -86,6 +89,16 @@
 	let creationHintQueued = $state(false);
 	let rightPanelWidth = $state(0);
 	let pendingEntryDrop = $state<{ vmcp?: VMCP }>();
+	let pendingConfigurableCreate: { entry: MCPCatalogEntry; component: VMCPComponent } | undefined;
+	let heldCreate:
+		| {
+				displayName: string;
+				description: string;
+				entry: MCPCatalogEntry;
+				component: VMCPComponent;
+		  }
+		| undefined;
+	let openConfigurationAfterCreateClose = false;
 	let pendingComponentDrop = $state<{
 		target: VMCP;
 		entry: MCPCatalogEntry;
@@ -291,7 +304,39 @@
 	function handleDroppedOnCreate(entry: MCPCatalogEntry) {
 		if (!canEdit) return;
 		if (mcpServerNeedsStaticOAuthConfiguration(entry)) return;
-		createEditVMcp?.openCreate([catalogEntryToVMCPComponent(entry)]);
+		const component = catalogEntryToVMCPComponent(entry);
+		pendingConfigurableCreate =
+			catalogConfigurationFields(entry).length === 0 ? undefined : { entry, component };
+		createEditVMcp?.openCreate([component]);
+	}
+
+	function handleCreateSubmit(draft: VMcpCreateDraft) {
+		const pending = pendingConfigurableCreate;
+		if (!pending) return false;
+
+		heldCreate = {
+			displayName: draft.displayName,
+			description: draft.description,
+			entry: pending.entry,
+			component: pending.component
+		};
+		pendingConfigurableCreate = undefined;
+		openConfigurationAfterCreateClose = true;
+		return true;
+	}
+
+	function handleCreateDialogClose() {
+		if (!openConfigurationAfterCreateClose) {
+			pendingConfigurableCreate = undefined;
+			return;
+		}
+
+		openConfigurationAfterCreateClose = false;
+		const held = heldCreate;
+		if (!held) return;
+		vmcpActions?.openConfiguration(held.entry, {
+			errorMessage: m.vmcps_failed_to_create()
+		});
 	}
 
 	async function addComponentToVMcp(
@@ -368,17 +413,40 @@
 		}
 	}
 
+	function handleConfigurationDismiss() {
+		heldCreate = undefined;
+		pendingConfigurableCreate = undefined;
+		pendingComponentDrop = undefined;
+	}
+
 	async function handleConfigurationNext(
 		configuration: VMCPConfigurationPolicy[],
 		forceSingleUser: boolean
 	) {
+		const held = heldCreate;
+		if (held) {
+			await createEditVMcp?.saveCreate({
+				displayName: held.displayName,
+				description: held.description,
+				components: [
+					{
+						...held.component,
+						configuration: configurationRetainingOmittedRequired(held.component, configuration),
+						forceSingleUser
+					}
+				]
+			});
+			heldCreate = undefined;
+			return;
+		}
+
 		const pending = pendingComponentDrop;
 		if (!pending) return;
 		componentDropPending = true;
 		try {
 			await addComponentToVMcp(pending.target, pending.entry, {
 				...pending.component,
-				configuration,
+				configuration: configurationRetainingOmittedRequired(pending.component, configuration),
 				forceSingleUser
 			});
 			pendingComponentDrop = undefined;
@@ -393,7 +461,7 @@
 	function handleVMcpCreated(created: VMCP) {
 		queueToolSetupForCreatedVMcp(created.id);
 		if (isFirstVMcp) queueCreationHintForCreatedVMcp(created.id);
-		goto(`/vmcps/${created.id}`);
+		goto(`/vmcps/${created.id}`, { replaceState: true });
 	}
 
 	function dismissCreationHint() {
@@ -665,10 +733,16 @@
 
 <VMcpToolDialogs flow={toolFlow} readonly={!canEdit || isCatalogSyncedVMcp(selectedVMcp)} />
 
-<VMcpActions bind:this={vmcpActions} onConfigurationNext={handleConfigurationNext} />
+<VMcpActions
+	bind:this={vmcpActions}
+	onConfigurationNext={handleConfigurationNext}
+	onConfigurationDismiss={handleConfigurationDismiss}
+/>
 
 <CreateEditVMcp
 	bind:this={createEditVMcp}
+	onCreate={handleCreateSubmit}
+	onClose={handleCreateDialogClose}
 	onCreated={handleVMcpCreated}
 	onDeleted={() => {
 		goto('/vmcps', { replaceState: true });
