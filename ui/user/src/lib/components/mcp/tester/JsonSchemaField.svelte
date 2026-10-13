@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { m } from '$lib/i18n';
+	import { getLocale, m } from '$lib/i18n';
 	import JsonSchemaField from './JsonSchemaField.svelte';
-	import { defaultJSONSchemaValue, nonNullableJSONSchema, type JSONSchema } from './json-schema';
+	import { defaultJSONSchemaValue, resolveUnionSchema, type JSONSchema } from './json-schema';
 	import { Plus, Trash2 } from '@lucide/svelte';
 
 	interface Props {
@@ -11,6 +11,9 @@
 		path: string;
 		required?: boolean;
 		disabled?: boolean;
+		// IDs of text outside this field that describes its control, such as an
+		// enclosing union's hint.
+		describedBy?: string;
 		onchange: (value: unknown) => void;
 	}
 
@@ -21,24 +24,36 @@
 		path,
 		required = false,
 		disabled = false,
+		describedBy,
 		onchange
 	}: Props = $props();
 	// Derived from a per-instance unique id rather than `path`: `-` is already the path
 	// separator, so sibling `a-b` and nested `a`/`b` would otherwise share a DOM id.
 	const uid = $props.id();
 	const id = `mcp-tester-field-${uid}`;
-	let nonNullable = $derived(nonNullableJSONSchema(schema));
+	// The member last rendered for this schema, kept so that clearing or retyping a
+	// value that momentarily matches no member does not swap the control under the user.
+	let chosen = $state.raw<{ schema: JSONSchema; index: number }>();
+	let union = $derived(
+		resolveUnionSchema(schema, value, chosen?.schema === schema ? chosen.index : undefined)
+	);
+	$effect(() => {
+		if (union && (chosen?.schema !== schema || chosen.index !== union.index)) {
+			chosen = { schema, index: union.index };
+		}
+	});
 	let enumIndex = $derived(schema.enum?.findIndex((entry) => Object.is(entry, value)) ?? -1);
 	let type = $derived(
 		Array.isArray(schema.type) ? schema.type.find((item) => item !== 'null') : schema.type
 	);
+	let alternativesId = $derived(union?.alternatives.length ? `${id}-alternatives` : undefined);
+	let controlDescribedBy = $derived(
+		[schema.description ? `${id}-description` : undefined, describedBy].filter(Boolean).join(' ') ||
+			undefined
+	);
 	let textDescribedBy = $derived(
-		[
-			schema.description ? `${id}-description` : undefined,
-			schema.pattern ? `${id}-pattern` : undefined
-		]
-			.filter(Boolean)
-			.join(' ') || undefined
+		[controlDescribedBy, schema.pattern ? `${id}-pattern` : undefined].filter(Boolean).join(' ') ||
+			undefined
 	);
 
 	function objectValue(): Record<string, unknown> {
@@ -66,31 +81,46 @@
 	}
 </script>
 
-{#if nonNullable}
+{#if union}
 	<div class="space-y-2">
-		<label class="flex items-center gap-2 text-sm">
-			<input
-				type="checkbox"
-				class="checkbox checkbox-sm"
-				checked={value === null}
-				{disabled}
-				onchange={(event) =>
-					onchange(event.currentTarget.checked ? null : defaultJSONSchemaValue(nonNullable))}
-			/>
-			{m.mcps_tester_use_null_for({ label })}
-		</label>
+		{#if union.nullable}
+			<label class="flex items-center gap-2 text-sm">
+				<input
+					type="checkbox"
+					class="checkbox checkbox-sm"
+					checked={value === null}
+					{disabled}
+					onchange={(event) =>
+						onchange(event.currentTarget.checked ? null : defaultJSONSchemaValue(union.schema))}
+				/>
+				{m.mcps_tester_use_null_for({ label })}
+			</label>
+		{/if}
 		<JsonSchemaField
-			schema={nonNullable}
+			schema={union.schema}
 			{value}
 			{label}
 			{path}
 			{required}
-			disabled={disabled || value === null}
+			disabled={disabled || (union.nullable && value === null)}
+			describedBy={[describedBy, alternativesId].filter(Boolean).join(' ') || undefined}
 			{onchange}
 		/>
+		{#if alternativesId}
+			<p id={alternativesId} class="text-xs text-muted-content">
+				{m.mcps_tester_union_also_accepts({
+					types: new Intl.ListFormat(getLocale(), { type: 'disjunction' }).format(
+						union.alternatives
+					)
+				})}
+			</p>
+		{/if}
 	</div>
 {:else if type === 'object'}
-	<fieldset class="border-base-300 dark:border-base-400 space-y-4 rounded-lg border p-4">
+	<fieldset
+		class="border-base-300 dark:border-base-400 space-y-4 rounded-lg border p-4"
+		aria-describedby={describedBy}
+	>
 		<legend class="px-1 text-sm font-medium">{label}{required ? ' *' : ''}</legend>
 		{#if schema.description}
 			<p class="text-xs text-muted-content">{schema.description}</p>
@@ -111,7 +141,10 @@
 		{/if}
 	</fieldset>
 {:else if type === 'array'}
-	<fieldset class="border-base-300 dark:border-base-400 space-y-3 rounded-lg border p-4">
+	<fieldset
+		class="border-base-300 dark:border-base-400 space-y-3 rounded-lg border p-4"
+		aria-describedby={describedBy}
+	>
 		<legend class="px-1 text-sm font-medium">{label}{required ? ' *' : ''}</legend>
 		{#if schema.description}
 			<p class="text-xs text-muted-content">{schema.description}</p>
@@ -162,7 +195,7 @@
 			<select
 				{id}
 				class="text-input-filled w-full"
-				aria-describedby={schema.description ? `${id}-description` : undefined}
+				aria-describedby={controlDescribedBy}
 				{disabled}
 				onchange={(event) => onchange(schema.enum?.[Number(event.currentTarget.value)])}
 			>
@@ -181,7 +214,7 @@
 				type="checkbox"
 				class="toggle"
 				checked={value === true}
-				aria-describedby={schema.description ? `${id}-description` : undefined}
+				aria-describedby={controlDescribedBy}
 				{disabled}
 				onchange={(event) => onchange(event.currentTarget.checked)}
 			/>
@@ -196,7 +229,7 @@
 				step={type === 'integer' ? 1 : (schema.multipleOf ?? 'any')}
 				{required}
 				{disabled}
-				aria-describedby={schema.description ? `${id}-description` : undefined}
+				aria-describedby={controlDescribedBy}
 				oninput={(event) =>
 					onchange(
 						event.currentTarget.value === '' ? undefined : event.currentTarget.valueAsNumber
