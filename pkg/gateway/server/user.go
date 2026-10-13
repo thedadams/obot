@@ -71,7 +71,7 @@ func (s *Server) getUsers(apiContext api.Context) error {
 	validUsers := make([]types.User, 0, len(users))
 	userIDs := make([]uint, 0, len(users))
 	for _, user := range users {
-		if user.Username != system.BootstrapName && user.Email != "" {
+		if user.Username != system.BootstrapName && (user.Email != "" || user.Internal) {
 			validUsers = append(validUsers, user)
 			userIDs = append(userIDs, user.ID)
 		}
@@ -219,6 +219,9 @@ func (s *Server) updateUser(apiContext api.Context) error {
 	status := http.StatusInternalServerError
 	existingUser, err := apiContext.GatewayClient.UpdateUser(apiContext.Context(), apiContext.UserIsAdmin(), user, userID)
 	if err != nil {
+		if _, ok := errors.AsType[*types2.ErrHTTP](err); ok {
+			return err
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			status = http.StatusNotFound
 		} else if lae := (*client.LastAdminError)(nil); errors.As(err, &lae) {
@@ -283,6 +286,9 @@ func (s *Server) changeUserInternalStatus(apiContext api.Context, internal bool)
 	}
 
 	if err := apiContext.GatewayClient.UpdateUserInternalStatus(apiContext.Context(), userID, internal); err != nil {
+		if _, ok := errors.AsType[*types2.ErrHTTP](err); ok {
+			return err
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return types2.NewErrNotFound("user %s not found", userID)
 		}
@@ -388,6 +394,9 @@ func (s *Server) deleteUser(apiContext api.Context) (err error) {
 	status := http.StatusInternalServerError
 	err = apiContext.GatewayClient.DeleteUser(apiContext.Context(), userID)
 	if err != nil {
+		if _, ok := errors.AsType[*types2.ErrHTTP](err); ok {
+			return err
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			status = http.StatusNotFound
 		} else if _, ok := errors.AsType[*client.LastAdminError](err); ok {

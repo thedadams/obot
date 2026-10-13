@@ -130,6 +130,7 @@ func (db *DB) AutoMigrate() (err error) {
 		types.AuthToken{},
 		types.TokenRequest{},
 		types.LLMAuditLog{},
+		types.EgressAuditLog{},
 		types.User{},
 		types.Identity{},
 		types.Group{},
@@ -158,6 +159,9 @@ func (db *DB) AutoMigrate() (err error) {
 		types.DeviceEnrollmentKey{},
 		types.Device{},
 		types.Credential{},
+		types.ClaudeOrganizationAccount{},
+		types.ClaudeEnvironment{},
+		types.ClaudeWorkOrder{},
 		types.LocalAuthUser{},
 		types.LocalAuthSession{},
 		types.EnforcementDecisionLog{},
@@ -191,6 +195,10 @@ func (db *DB) AutoMigrate() (err error) {
 
 	if err = migrateIfEntryNotFoundInMigrationsTable(tx, "drop_published_artifact_scope_columns", dropPublishedArtifactScopeColumns); err != nil {
 		return fmt.Errorf("failed to drop the published artifact scope columns: %w", err)
+	}
+
+	if err = migrateIfEntryNotFoundInMigrationsTable(tx, "retire_hosted_agent_api_keys", retireHostedAgentAPIKeys); err != nil {
+		return fmt.Errorf("failed to retire hosted agent API keys: %w", err)
 	}
 
 	// MIGRATION: replace mcp_server_instance with mcp_id as the new primary key.

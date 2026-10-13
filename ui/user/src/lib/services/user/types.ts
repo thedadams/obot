@@ -915,6 +915,7 @@ export interface DefaultModelAlias {
 // Organization
 
 export interface OrgUser {
+	internal?: boolean;
 	created: string;
 	username: string;
 	email: string;
@@ -1066,7 +1067,7 @@ export interface Version {
 	mcpNetworkPolicyEnabled?: boolean;
 	mcpDefaultDenyAllEgress?: boolean;
 	messagePoliciesEnabled?: boolean;
-	hostedAgentsEnabled?: boolean;
+	claudeEnvironmentsEnabled?: boolean;
 	hideK8sDetails?: boolean;
 	disableLegacyChat?: boolean;
 }
