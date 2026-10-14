@@ -173,6 +173,107 @@ describe('ToolsInspector', () => {
 		await expect.element(page.getByLabelText('Arguments JSON')).toHaveValue('{}');
 	});
 
+	it('shows details for tools whose schema has object or array defaults', async () => {
+		const { session } = renderInspector(0);
+		// The tools land in the session's deep $state, so their schemas are proxies,
+		// as they are when loaded from a server.
+		session.cache.tools.items = [
+			{
+				name: 'tavily_research',
+				description: 'Research a topic.',
+				inputSchema: {
+					type: 'object' as const,
+					properties: { input: { type: 'string' } },
+					required: ['input']
+				}
+			},
+			{
+				name: 'tavily_crawl',
+				description: 'Crawl a site.',
+				inputSchema: {
+					type: 'object' as const,
+					properties: {
+						url: { type: 'string' },
+						select_paths: { type: 'array', items: { type: 'string' }, default: [] }
+					},
+					required: ['url']
+				}
+			}
+		];
+
+		const details = page.getByRole('region', { name: 'Tool details' });
+		await page.getByRole('button', { name: 'tavily_research', exact: false }).click();
+		await expect.element(details.getByText('Research a topic.')).toBeVisible();
+
+		await page.getByRole('button', { name: 'tavily_crawl', exact: false }).click();
+		await expect
+			.element(details.getByRole('heading', { name: 'tavily_crawl', level: 3 }))
+			.toBeVisible();
+		await expect.element(details.getByText('Crawl a site.')).toBeVisible();
+		await expect.element(details.getByText('Research a topic.')).not.toBeInTheDocument();
+		await expect.element(details.getByRole('group', { name: 'select_paths' })).toBeVisible();
+		await expect.element(page.getByRole('button', { name: 'Call' })).toBeDisabled();
+
+		await page.getByLabelText('url *').fill('https://example.com');
+		await expect.element(page.getByRole('button', { name: 'Call' })).toBeEnabled();
+
+		session.close();
+	});
+
+	it('resets the argument form when switching between tools with identical schemas', async () => {
+		const { session } = renderInspector(0);
+		const inputSchema = {
+			type: 'object' as const,
+			properties: { value: { type: 'string' } },
+			required: ['value']
+		};
+		session.cache.tools.items = [
+			{ name: 'first_tool', inputSchema },
+			{ name: 'second_tool', inputSchema }
+		];
+
+		await page.getByRole('button', { name: 'first_tool', exact: false }).click();
+		await page.getByLabelText('value *').fill('typed');
+		await expect.element(page.getByRole('button', { name: 'Call' })).toBeEnabled();
+
+		await page.getByRole('button', { name: 'second_tool', exact: false }).click();
+		await expect
+			.element(page.getByRole('heading', { name: 'second_tool', level: 3 }))
+			.toBeVisible();
+		await expect.element(page.getByLabelText('value *')).toHaveValue('');
+		await expect.element(page.getByRole('button', { name: 'Call' })).toBeDisabled();
+
+		session.close();
+	});
+
+	it('replaces a form that fails to render with an alert and clears its arguments', async () => {
+		const { session } = renderInspector(1);
+		await page.getByRole('button', { name: 'tool_0', exact: false }).click();
+		await page.getByLabelText('value').fill('typed');
+		await expect.element(page.getByRole('button', { name: 'Call' })).toBeEnabled();
+
+		// Refresh returns a malformed schema (enum must be an array), which the form
+		// throws on. selectTool is not called, so only the boundary can clear the arguments.
+		const [tool] = session.cache.tools.items;
+		session.cache.tools.items = [
+			{
+				...tool,
+				inputSchema: {
+					type: 'object' as const,
+					properties: { mode: { type: 'string', enum: 'fast' as unknown as string[] } }
+				}
+			}
+		];
+
+		await expect
+			.element(page.getByRole('alert').getByText('could not be displayed', { exact: false }))
+			.toBeVisible();
+		await expect.element(page.getByLabelText('value')).not.toBeInTheDocument();
+		await expect.element(page.getByRole('button', { name: 'Call' })).toBeDisabled();
+
+		session.close();
+	});
+
 	it('locks the tool list while a workflow runs so results stay with their tool', async () => {
 		const { session } = renderInspector(3);
 		await page.getByRole('button', { name: 'tool_0', exact: false }).click();

@@ -114,15 +114,32 @@
 							{#if selected.description}<p class="mt-2 text-sm">{selected.description}</p>{/if}
 						</div>
 
-						{#key JSON.stringify(selected.inputSchema)}
-							<JsonSchemaForm
-								schema={selected.inputSchema}
-								disabled={Boolean(session.activeWorkflow)}
-								onvalidchange={(value) => {
-									inspector.argumentsValue = value;
+						<!-- Keyed by tool too, so tools with identical schemas don't share form state. A form
+						     that fails must not leave the previous form or its arguments in place. -->
+						{#key JSON.stringify([selected.name, selected.inputSchema])}
+							<svelte:boundary
+								onerror={() => {
+									inspector.argumentsValue = undefined;
 									inspector.result = undefined;
 								}}
-							/>
+							>
+								<JsonSchemaForm
+									schema={selected.inputSchema}
+									disabled={Boolean(session.activeWorkflow)}
+									onvalidchange={(value) => {
+										inspector.argumentsValue = value;
+										inspector.result = undefined;
+									}}
+								/>
+								{#snippet failed(error)}
+									<div class="notification-error p-4" role="alert">
+										<strong>{m.mcps_tester_tool_form_failed()}</strong>
+										<p class="mt-1 text-sm">
+											{error instanceof Error ? error.message : String(error)}
+										</p>
+									</div>
+								{/snippet}
+							</svelte:boundary>
 						{/key}
 
 						{#if selected.outputSchema}
