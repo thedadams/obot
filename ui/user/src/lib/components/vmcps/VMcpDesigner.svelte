@@ -340,6 +340,7 @@
 		const held = heldCreate;
 		if (!held) return;
 		vmcpActions?.openConfiguration(held.entry, {
+			isShared: Boolean(profile.current.isAdmin?.()),
 			errorMessage: m.vmcps_failed_to_create()
 		});
 	}
@@ -469,7 +470,7 @@
 
 		pendingComponentDrop = { target, entry, component };
 		componentDropPending = false;
-		vmcpActions?.openConfiguration(entry);
+		vmcpActions?.openConfiguration(entry, { isShared: !target.userID });
 	}
 
 	async function confirmDuplicateComponent() {
