@@ -106,6 +106,15 @@
 		}
 	});
 
+	// Parent updates (such as imported catalog details) must reach an editor
+	// that is already mounted, not just the Markdown preview.
+	$effect(() => {
+		const nextValue = value;
+		if (cmView) {
+			untrack(() => void setValue(nextValue));
+		}
+	});
+
 	// Effect to handle dark mode changes
 	$effect(() => {
 		if (setDarkMode !== darkMode.isDark && typeof reload === 'function') {
@@ -150,7 +159,7 @@
 			}
 		});
 
-		let state: CMEditorState = CMEditorState.create({
+		const state: CMEditorState = CMEditorState.create({
 			doc: value
 		});
 
@@ -168,7 +177,7 @@
 			if (disabled) contentAttrs['aria-readonly'] = 'true';
 
 			const newState = CMEditorState.create({
-				doc: state.doc,
+				doc: cmView?.state.doc ?? value,
 				extensions: [
 					basicSetup,
 					darkMode.isDark ? githubDark : githubLight,
@@ -182,7 +191,6 @@
 				]
 			});
 			cmView?.setState(newState);
-			state = newState;
 			setDarkMode = darkMode.isDark;
 		};
 		reload();

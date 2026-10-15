@@ -520,6 +520,7 @@ export function isMultiUserServer(server?: MCPCatalogServer) {
 
 export function getServerTypeLabelByType(type?: string) {
 	if (!type) return '';
+	if (type === 'openapi') return 'OpenAPI';
 	return type === 'hosted'
 		? 'Hosted'
 		: type === 'multi'
@@ -663,7 +664,8 @@ function validateHeaders(type: LaunchServerType | 'filter', headers: MCPServerIn
 export const validateRuntimeForm = (
 	formData: RuntimeFormData,
 	type: LaunchServerType | 'filter',
-	nameNotRequired: boolean = false
+	nameNotRequired: boolean = false,
+	openAPIImported: boolean = false
 ): { required: Record<string, boolean>; invalid: Record<string, boolean> } => {
 	const missingFields: Record<string, boolean> = {};
 	const invalid: Record<string, boolean> = {};
@@ -697,6 +699,9 @@ export const validateRuntimeForm = (
 
 	// Runtime-specific validation
 	switch (formData.runtime) {
+		case 'openapi':
+			if (!openAPIImported) missingFields.openAPIImport = true;
+			break;
 		case 'npx':
 			if (!formData.npxConfig?.package?.trim()) {
 				missingFields.package = true;

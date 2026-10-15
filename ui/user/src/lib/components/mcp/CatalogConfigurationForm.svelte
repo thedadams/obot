@@ -10,6 +10,8 @@
 	interface Props {
 		config?: MCPConfig[];
 		readonly?: boolean;
+		headersOnly?: boolean;
+		hasDuplicateKeys?: boolean;
 		secretBindingTargets?: MCPAllowedSecretBindingTarget[];
 		showRequired?: boolean;
 		showInvalid?: boolean;
@@ -18,6 +20,8 @@
 	let {
 		config = $bindable(),
 		readonly,
+		headersOnly = false,
+		hasDuplicateKeys = false,
 		secretBindingTargets,
 		showRequired,
 		showInvalid
@@ -40,9 +44,16 @@
 		<div class="flex flex-col gap-1">
 			<h4 class="text-sm font-semibold">{m.mcps_catalog_config_heading()}</h4>
 			<p class="text-muted-content text-xs font-light">
-				{m.mcps_config_description()}
+				{#if headersOnly}
+					{m.mcps_openapi_headers_help()}
+				{:else}
+					{m.mcps_config_description()}
+				{/if}
 			</p>
 		</div>
+		{#if headersOnly && showInvalid && hasDuplicateKeys}
+			<p class="text-error text-xs" role="alert">{m.mcps_openapi_duplicate_header_error()}</p>
+		{/if}
 
 		{#each config ?? [] as item, i (i)}
 			<div
@@ -57,7 +68,9 @@
 							id={`catalog-config-usage-${i}`}
 							class="dark:border-base-400 bg-base-100 border border-transparent"
 							classes={{ root: 'flex grow' }}
-							options={usageOptions}
+							options={headersOnly
+								? usageOptions.filter((option) => option.id === 'header')
+								: usageOptions}
 							selected={item.usage}
 							disabled={readonly}
 							onSelect={(option) => {
@@ -76,6 +89,9 @@
 						{showRequired}
 						{showInvalid}
 					/>
+					{#if headersOnly && showInvalid && !item.required}
+						<p class="text-error text-xs" role="alert">{m.mcps_openapi_header_required_error()}</p>
+					{/if}
 
 					{#if item.usage === 'header'}
 						<div class="flex w-full flex-col gap-1">
@@ -114,13 +130,13 @@
 					onclick={() => {
 						config ??= [];
 						config.push({
-							usage: 'env',
+							usage: headersOnly ? 'header' : 'env',
 							key: '',
 							description: '',
 							name: '',
 							value: '',
-							required: false,
-							sensitive: false
+							required: headersOnly,
+							sensitive: headersOnly
 						});
 					}}
 				>
