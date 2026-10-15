@@ -42,7 +42,7 @@
 		type VMCPComponent,
 		type VMCPConfigurationPolicy
 	} from '$lib/services';
-	import { MAX_TOOL_PREFIX_LENGTH } from '$lib/services/user/mcp';
+	import { MAX_TOOL_PREFIX_LENGTH, hasEditableFields } from '$lib/services/user/mcp';
 	import { vmcpRowHeight } from '$lib/services/vmcps/camera';
 	import { SHORT_DESCRIPTION_MAX_LENGTH } from '$lib/services/vmcps/constants';
 	import type { VMcpConnectOptions } from '$lib/services/vmcps/types';
@@ -70,9 +70,17 @@
 		usersMap: Map<string, OrgUser>;
 		isFirstVMcp?: boolean;
 		showBackButton?: boolean;
+		workspaceId?: string;
 	}
 
-	let { vmcp, onBack, usersMap, isFirstVMcp = false, showBackButton = true }: Props = $props();
+	let {
+		vmcp,
+		onBack,
+		usersMap,
+		isFirstVMcp = false,
+		showBackButton = true,
+		workspaceId
+	}: Props = $props();
 
 	let view = $derived(
 		(page.url.searchParams.get('view') as 'graph' | 'profiles' | 'inspector' | undefined) ?? 'graph'
@@ -306,12 +314,23 @@
 		handleDroppedOnCreate(created);
 	}
 
+	function componentWithoutConfigurationStep(component: VMCPComponent): VMCPComponent {
+		return {
+			...component,
+			configuration: configurationRetainingOmittedRequired(component, [])
+		};
+	}
+
 	function handleDroppedOnCreate(entry: MCPCatalogEntry) {
 		if (!canEdit) return;
 		if (mcpServerNeedsStaticOAuthConfiguration(entry)) return;
 		const component = catalogEntryToVMCPComponent(entry);
-		pendingConfigurableCreate =
-			catalogConfigurationFields(entry).length === 0 ? undefined : { entry, component };
+		if (!hasEditableFields(catalogConfigurationFields(entry))) {
+			pendingConfigurableCreate = undefined;
+			createEditVMcp?.openCreate([componentWithoutConfigurationStep(component)]);
+			return;
+		}
+		pendingConfigurableCreate = { entry, component };
 		createEditVMcp?.openCreate([component]);
 	}
 
@@ -461,9 +480,9 @@
 		entry: MCPCatalogEntry,
 		component: VMCPComponent
 	) {
-		if (catalogConfigurationFields(entry).length === 0) {
+		if (!hasEditableFields(catalogConfigurationFields(entry))) {
 			componentDropPending = true;
-			await addComponentToVMcp(target, entry, component);
+			await addComponentToVMcp(target, entry, componentWithoutConfigurationStep(component));
 			if (!toolFlow.dialog) componentDropPending = false;
 			return;
 		}
@@ -867,6 +886,7 @@
 	onCreated={handleCatalogEntryCreated}
 	onAddToVMcp={canEdit ? handleAddFromDetails : undefined}
 	addToVMcpLabel={selectedVMcp ? m.vmcps_add_to_vmcp() : m.vmcps_create_vmcp()}
+	{workspaceId}
 />
 
 <VMcpIntroduction show={isFirstVMcp && !selectedVMcp && canEdit && viewType === 'graph'} />
