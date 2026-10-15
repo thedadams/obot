@@ -2669,7 +2669,7 @@ describe('VMcpDesigner.svelte', () => {
 				vmcpID: vmcp.id,
 				userID: getProfileResponse.id,
 				created: vmcp.created,
-				status: { configured: true }
+				status: { configured: true, configurationCheckHash: 'configured' }
 			};
 			let authenticated = false;
 			let created = false;
@@ -2685,6 +2685,7 @@ describe('VMcpDesigner.svelte', () => {
 					created = true;
 					return HttpResponse.json(instance);
 				}),
+				http.get('/api/vmcp-instances/:id', () => HttpResponse.json(instance)),
 				http.get('/api/vmcp-instances', () =>
 					HttpResponse.json({ items: created ? [instance] : [] })
 				),

@@ -86,7 +86,9 @@
 		return { key: 'inspector', value: vmcp.id };
 	}
 
-	let launching = $derived(loading || (vmcpInstances.current.loading && !launched));
+	let launching = $derived(
+		loading || (vmcpInstances.current.loading && !instance?.status?.configured)
+	);
 	let showTester = $derived(
 		Boolean(instance?.status?.configured) && !sessionStartFailed && !missingOAuthComponent
 	);
