@@ -260,6 +260,9 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/obot-platform/obot/apiclient/types.OAuthDebuggerTokenRequest":                 schema_obot_platform_obot_apiclient_types_OAuthDebuggerTokenRequest(ref),
 		"github.com/obot-platform/obot/apiclient/types.OAuthMetadata":                             schema_obot_platform_obot_apiclient_types_OAuthMetadata(ref),
 		"github.com/obot-platform/obot/apiclient/types.OAuthToken":                                schema_obot_platform_obot_apiclient_types_OAuthToken(ref),
+		"github.com/obot-platform/obot/apiclient/types.OpenAPIDestinationValidation":              schema_obot_platform_obot_apiclient_types_OpenAPIDestinationValidation(ref),
+		"github.com/obot-platform/obot/apiclient/types.OpenAPIImportResponse":                     schema_obot_platform_obot_apiclient_types_OpenAPIImportResponse(ref),
+		"github.com/obot-platform/obot/apiclient/types.OpenAPIMetadata":                           schema_obot_platform_obot_apiclient_types_OpenAPIMetadata(ref),
 		"github.com/obot-platform/obot/apiclient/types.OpenAPIRuntimeConfig":                      schema_obot_platform_obot_apiclient_types_OpenAPIRuntimeConfig(ref),
 		"github.com/obot-platform/obot/apiclient/types.OpenAPISchema":                             schema_obot_platform_obot_apiclient_types_OpenAPISchema(ref),
 		"github.com/obot-platform/obot/apiclient/types.OpenAPISource":                             schema_obot_platform_obot_apiclient_types_OpenAPISource(ref),
@@ -13050,6 +13053,119 @@ func schema_obot_platform_obot_apiclient_types_OAuthToken(ref common.ReferenceCa
 	}
 }
 
+func schema_obot_platform_obot_apiclient_types_OpenAPIDestinationValidation(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "OpenAPIDestinationValidation reports whether the effective API destination satisfies the configured HTTPS and network policy. It does not test API availability or credentials. An invalid destination requires a valid override.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"valid": {
+						SchemaProps: spec.SchemaProps{
+							Default: false,
+							Type:    []string{"boolean"},
+							Format:  "",
+						},
+					},
+					"error": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"valid"},
+			},
+		},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_OpenAPIImportResponse(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "OpenAPIImportResponse describes a validated schema and suggested credential inputs. Importing does not create a catalog entry or store credentials.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"baseURL": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"suggestedHeaders": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SuggestedHeaders contains credential input definitions derived from the schema's security schemes, without credential values. Clients can use these to prefill the catalog entry's header configuration.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("github.com/obot-platform/obot/apiclient/types.MCPConfig"),
+									},
+								},
+							},
+						},
+					},
+					"suggestedMetadata": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SuggestedMetadata contains editable catalog details derived from the schema's info fields and x-logo extension to prefill the creation form.",
+							Default:     map[string]interface{}{},
+							Ref:         ref("github.com/obot-platform/obot/apiclient/types.OpenAPIMetadata"),
+						},
+					},
+					"destinationValidation": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref("github.com/obot-platform/obot/apiclient/types.OpenAPIDestinationValidation"),
+						},
+					},
+				},
+				Required: []string{"baseURL", "suggestedHeaders", "suggestedMetadata", "destinationValidation"},
+			},
+		},
+		Dependencies: []string{
+			"github.com/obot-platform/obot/apiclient/types.MCPConfig", "github.com/obot-platform/obot/apiclient/types.OpenAPIDestinationValidation", "github.com/obot-platform/obot/apiclient/types.OpenAPIMetadata"},
+	}
+}
+
+func schema_obot_platform_obot_apiclient_types_OpenAPIMetadata(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "OpenAPIMetadata contains editable catalog details suggested by a schema.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"shortDescription": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"icon": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_obot_platform_obot_apiclient_types_OpenAPIRuntimeConfig(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -13065,7 +13181,7 @@ func schema_obot_platform_obot_apiclient_types_OpenAPIRuntimeConfig(ref common.R
 					},
 					"schema": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Schema is the normalized JSON snapshot used by running servers instead of Source. Callers accepting supplied snapshots must validate them before storage.",
+							Description: "Schema is the normalized JSON snapshot used by running servers instead of Source. Obot imports Source on every save and sets this field. It is omitted from API responses and ignored when saving catalog entries through the API. Import requests and GitOps catalog entries that set it are rejected.",
 							Ref:         ref("github.com/obot-platform/obot/apiclient/types.OpenAPISchema"),
 						},
 					},

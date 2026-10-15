@@ -116,6 +116,47 @@ func TestConvertMCPServer_SecretBindingsUseStatus(t *testing.T) {
 	}
 }
 
+func TestConvertMCPServer_ExtractedStaticValuesAreConfigured(t *testing.T) {
+	server := v1.MCPServer{
+		Spec: v1.MCPServerSpec{
+			Manifest: types.MCPServerManifest{
+				Runtime: types.RuntimeRemote,
+				Config: []types.MCPConfig{
+					{
+						Key:      "REGION",
+						Value:    "us-west",
+						Required: true,
+						Usage:    types.Env,
+					},
+					{
+						Key:      "X-Tenant",
+						Value:    "tenant-1",
+						Required: true,
+						Usage:    types.Header,
+					},
+				},
+			},
+		},
+	}
+
+	values, err := mcp.ExtractStaticConfiguration(server.Spec.Manifest.Config, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{
+		"REGION":   "us-west",
+		"X-Tenant": "tenant-1",
+	}, values)
+	for _, field := range server.Spec.Manifest.Config {
+		require.True(t, field.Static)
+		require.Empty(t, field.Value)
+	}
+
+	converted := ConvertMCPServer(server, nil)
+
+	assert.True(t, converted.Configured)
+	assert.Empty(t, converted.MissingRequiredEnvVars)
+	assert.Empty(t, converted.MissingRequiredHeaders)
+}
+
 func TestConvertMCPResources(t *testing.T) {
 	resources := &types.MCPResourceRequirements{
 		Requests: types.MCPResourceRequests{CPU: "250m", Memory: "512Mi"},
