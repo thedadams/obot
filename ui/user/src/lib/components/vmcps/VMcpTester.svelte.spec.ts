@@ -372,3 +372,32 @@ describe('VMcpTester', () => {
 		}
 	);
 });
+
+it('shows CLI login and retries the inspector for localhost OAuth', async () => {
+	const target = createConfigurableVMcp();
+	const attemptURL = `${window.location.origin}/oauth/mcp/login/component-attempt`;
+	worker.use(
+		http.get('*/oauth/mcp/login/:state', () => HttpResponse.json({})),
+		http.get('/api/oauth/vmcp/vmcpi-1', () =>
+			HttpResponse.json([{ mcpServerID: 'temp-component', authURL: attemptURL }])
+		),
+		http.get('/api/oauth/vmcp/vmcpi-1/components/temp-component', () =>
+			HttpResponse.json({ authURL: '' })
+		)
+	);
+	target.localhostCallbackPaths = ['/custom/callback'];
+	await renderVMcpTester(
+		{},
+		{ vmcp: target, instance: createInstance({ configured: true }), connectFailureStatus: 401 }
+	);
+	await page.getByRole('button', { name: 'Authenticate', exact: true }).click();
+	await expect
+		.element(page.getByLabelText('Authentication command'))
+		.toHaveTextContent(`obot mcp login "${attemptURL}"`);
+	mockMCPInitialization('vmcpi-1');
+	worker.use(http.get('*/oauth/mcp/login/:state', () => new HttpResponse(null, { status: 400 })));
+	document.dispatchEvent(new Event('visibilitychange'));
+	await expect
+		.element(page.getByRole('heading', { name: 'Reauthentication required' }))
+		.not.toBeInTheDocument();
+});

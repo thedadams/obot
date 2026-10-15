@@ -26,7 +26,8 @@
 		isMultiUserCatalogEntry,
 		isDeprecatedMCPServer,
 		isMultiUserServer,
-		getMcpValueLabel
+		getMcpValueLabel,
+		isMcpLoginURL
 	} from '$lib/services/user/mcp';
 	import { profile } from '$lib/stores';
 	import { success } from '$lib/stores/success';
@@ -37,6 +38,7 @@
 	import ResponsiveDialog from '../ResponsiveDialog.svelte';
 	import Select from '../Select.svelte';
 	import CatalogConfigureForm, { type LaunchFormData } from '../mcp/CatalogConfigureForm.svelte';
+	import McpLogin from '../mcp/McpLogin.svelte';
 	import McpServerDetails from '../mcp/McpServerDetails.svelte';
 	import McpServerInfo from '../mcp/McpServerInfo.svelte';
 	import McpServerTools from '../mcp/McpServerTools.svelte';
@@ -450,7 +452,7 @@
 
 	async function handleVisibilityChange() {
 		if (!entry || !id) return;
-		if (document.visibilityState !== 'visible') return;
+		if (document.visibilityState !== 'visible' || isMcpLoginURL(oauthURL ?? '')) return;
 
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		handleLaunchTemporaryInstance();
@@ -1304,7 +1306,9 @@
 
 <ResponsiveDialog
 	bind:this={oauthDialog}
-	title={m.mcps_catalog_authentication_required()}
+	title={oauthURL && isMcpLoginURL(oauthURL)
+		? m.mcps_login_tools_title({ name: getMCPDisplayName(entry) })
+		: m.mcps_catalog_authentication_required()}
 	class="w-md"
 	onClose={() => {
 		// Clean up when dialog closes
@@ -1314,7 +1318,16 @@
 	{#if error}
 		{@render errorSnippet()}
 	{/if}
-	{#if saving}
+	{#if oauthURL && isMcpLoginURL(oauthURL)}
+		<McpLogin
+			url={oauthURL}
+			serverName={getMCPDisplayName(entry)}
+			purpose="tools"
+			showTitle={false}
+			loading={saving}
+			onComplete={() => handleLaunchTemporaryInstance()}
+		/>
+	{:else if saving}
 		<div class="flex w-full justify-center">
 			<Loading class="size-6" />
 		</div>

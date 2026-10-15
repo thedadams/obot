@@ -56,3 +56,7 @@ Continue to [`--clients is required in non-interactive mode`](../reference/cli-a
 ### Existing URL mismatch {#existing-url-mismatch}
 
 Continue to [Existing URL mismatch](../reference/cli-api.md#cli-setup-existing-url-mismatch).
+
+## Authenticate providers that require localhost callbacks
+
+Continue to [MCP localhost OAuth sign-in](../reference/cli-api.md#mcp-localhost-oauth-sign-in).

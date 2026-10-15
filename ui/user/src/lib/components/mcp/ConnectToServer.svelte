@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { dialogAnimation } from '$lib/actions/dialogAnimation';
+	import McpLocalAuth from '$lib/components/mcp/McpLocalAuth.svelte';
 	import { DEFAULT_MCP_CATALOG_ID } from '$lib/constants';
 	import { m } from '$lib/i18n';
 	import {
@@ -13,6 +13,7 @@
 		Group
 	} from '$lib/services';
 	import { EventStreamService } from '$lib/services/admin/eventstream.svelte';
+	import { isMcpLoginURL } from '$lib/services/user/mcp';
 	import {
 		convertEnvHeadersToRecord,
 		getSecretBindingEngineError,
@@ -29,11 +30,11 @@
 	import { goto } from '$lib/url';
 	import Confirm from '../Confirm.svelte';
 	import DotDotDot from '../DotDotDot.svelte';
+	import ResponsiveDialog from '../ResponsiveDialog.svelte';
 	import SelectMcpAccessControlRules from '../admin/SelectMcpAccessControlRules.svelte';
-	import IconButton from '../primitives/IconButton.svelte';
 	import CatalogConfigureForm, { type LaunchFormData } from './CatalogConfigureForm.svelte';
 	import McpDeprecatedNotice from './McpDeprecatedNotice.svelte';
-	import { Server, X, CircleAlert } from '@lucide/svelte';
+	import { Server, CircleAlert } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { twMerge } from 'tailwind-merge';
@@ -136,9 +137,10 @@
 		}
 	}
 
-	let oauthDialog = $state<HTMLDialogElement>();
+	let oauthDialog = $state<ReturnType<typeof ResponsiveDialog>>();
 	let oauthURL = $state<string>('');
 	let oauthVerifying = $state(false);
+	let oauthChecking = $state(false);
 
 	let selectRulesDialog = $state<ReturnType<typeof SelectMcpAccessControlRules>>();
 
@@ -365,20 +367,34 @@
 	}
 
 	async function handleOauthVisibilityChange() {
-		if (!oauthURL && !oauthVerifying) return;
+		// The Continue button and the visibility listener can both fire; run one check at a time.
+		if ((!oauthURL && !oauthVerifying) || oauthChecking) return;
 		if (document.visibilityState === 'visible') {
-			oauthURL = await getOauthURL();
-			if (!oauthURL) {
-				oauthDialog?.close();
-				handleConnect();
+			oauthChecking = true;
+			const currentURL = oauthURL;
+			try {
+				const nextURL = await getOauthURL();
+				// Dismissal or a newer attempt must not complete from a stale response.
+				if (oauthURL !== currentURL) return;
+				oauthURL = nextURL;
+				if (!oauthURL) {
+					oauthDialog?.close();
+					handleConnect();
+				}
+				oauthVerifying = false;
+			} finally {
+				oauthChecking = false;
 			}
-			oauthVerifying = false;
 		}
 	}
 
+	function handleOauthTabReturn() {
+		if (!isMcpLoginURL(oauthURL)) void handleOauthVisibilityChange();
+	}
+
 	function ensureOauthVisibilityListener() {
-		document.removeEventListener('visibilitychange', handleOauthVisibilityChange);
-		document.addEventListener('visibilitychange', handleOauthVisibilityChange);
+		document.removeEventListener('visibilitychange', handleOauthTabReturn);
+		document.addEventListener('visibilitychange', handleOauthTabReturn);
 	}
 
 	async function verifyOauthOrConnect() {
@@ -391,7 +407,7 @@
 			launchProgress = 0;
 			if (oauthURL) {
 				configDialog?.close();
-				oauthDialog?.showModal();
+				oauthDialog?.open();
 			} else {
 				handleConnect();
 			}
@@ -612,7 +628,7 @@
 	async function finishMultiUserServerConnect() {
 		oauthURL = await getOauthURL();
 		if (oauthURL) {
-			oauthDialog?.showModal();
+			oauthDialog?.open();
 		} else {
 			handleConnect();
 		}
@@ -845,7 +861,7 @@
 	onMount(() => {
 		ensureOauthVisibilityListener();
 		return () => {
-			document.removeEventListener('visibilitychange', handleOauthVisibilityChange);
+			document.removeEventListener('visibilitychange', handleOauthTabReturn);
 		};
 	});
 </script>
@@ -1080,39 +1096,50 @@
 	{/snippet}
 </CatalogConfigureForm>
 
-<dialog bind:this={oauthDialog} class="dialog" use:dialogAnimation={{ type: 'slide' }}>
-	<div class="dialog-container md:w-sm">
-		<div class="flex flex-col gap-4 p-4">
-			{#if oauthURL}
-				<div class="absolute top-2 right-2">
-					<IconButton onclick={handleOauthClose}>
-						<X class="size-4" />
-					</IconButton>
-				</div>
-				<div class="flex items-center gap-2">
-					<div class="h-fit shrink-0 self-start rounded-md bg-base-200 p-1 dark:bg-base-300">
-						{#if server?.manifest.icon}
-							<img src={server?.manifest.icon} alt={getMCPDisplayName(server)} class="size-6" />
-						{:else}
-							<Server class="size-6" />
-						{/if}
-					</div>
-					<h3 class="text-lg leading-5.5 font-semibold">
-						{getMCPDisplayName(server)}
-					</h3>
-				</div>
-
-				<p>
+<ResponsiveDialog
+	bind:this={oauthDialog}
+	animate="slide"
+	classes={{ header: 'mb-0' }}
+	onClose={() => {
+		if (oauthURL) handleOauthClose();
+	}}
+>
+	{#snippet titleContent()}
+		<div class="flex min-w-0 items-center gap-2">
+			<div class="bg-base-200 rounded-sm p-1 dark:bg-base-300">
+				{#if server?.manifest.icon}
+					<img src={server.manifest.icon} alt={getMCPDisplayName(server)} class="size-8" />
+				{:else}
+					<Server class="size-8" />
+				{/if}
+			</div>
+			{getMCPDisplayName(server)}
+		</div>
+	{/snippet}
+	<div
+		class={isMcpLoginURL(oauthURL)
+			? 'flex min-w-0 flex-col gap-4'
+			: 'flex min-w-0 flex-col gap-4 p-4 md:p-0'}
+	>
+		{#if oauthURL}
+			{#if !isMcpLoginURL(oauthURL)}<p class="text-sm">
 					{m.mcps_connect_oauth_required({ name: getMCPDisplayName(server) })}
-				</p>
-
+				</p>{/if}
+			{#if isMcpLoginURL(oauthURL)}
+				<McpLocalAuth
+					url={oauthURL}
+					serverName={getMCPDisplayName(server, entry?.manifest?.name ?? '')}
+					onComplete={handleOauthVisibilityChange}
+					loading={oauthChecking}
+				/>
+			{:else}
 				<p>{m.mcps_connect_oauth_click_link()}</p>
 
 				<a
 					href={oauthURL}
 					rel="external noopener noreferrer"
 					target="_blank"
-					class="btn btn-primary text-center text-sm outline-none"
+					class="btn btn-primary self-end text-center text-sm outline-none"
 					onclick={() => {
 						oauthVerifying = true;
 					}}
@@ -1124,14 +1151,9 @@
 					{/if}
 				</a>
 			{/if}
-		</div>
+		{/if}
 	</div>
-	<form class="dialog-backdrop">
-		<button type="button" aria-label={m.common_close_dialog()} onclick={handleOauthClose}
-			>{m.common_close()}</button
-		>
-	</form>
-</dialog>
+</ResponsiveDialog>
 
 <SelectMcpAccessControlRules
 	bind:this={selectRulesDialog}

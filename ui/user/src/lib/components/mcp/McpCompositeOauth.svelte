@@ -3,8 +3,10 @@
 	import { m } from '$lib/i18n';
 	import Loading from '$lib/icons/Loading.svelte';
 	import { UserService, type PendingCompositeAuth, type VMCP } from '$lib/services';
+	import { isMcpLoginURL } from '$lib/services/user/mcp';
 	import { isDeprecatedMCPServer } from '$lib/services/user/mcp';
 	import McpDeprecatedNotice from './McpDeprecatedNotice.svelte';
+	import McpLocalAuth from './McpLocalAuth.svelte';
 	import { Server } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -16,6 +18,7 @@
 		oauthAuthRequestId?: string;
 		onComplete?: () => void;
 		class?: string;
+		embedded?: boolean;
 	}
 
 	let {
@@ -23,7 +26,8 @@
 		vmcpId,
 		oauthAuthRequestId,
 		onComplete,
-		class: className
+		class: className,
+		embedded = false
 	}: Props = $props();
 
 	type OAuthParent = VMCP;
@@ -112,7 +116,7 @@
 		}
 	}
 
-	async function checkComponent(item: PendingCompositeAuth) {
+	async function checkComponent(item: PendingCompositeAuth, propagateError = false) {
 		const id = item.mcpServerID;
 		if (checking.has(id)) return;
 		checking.add(id);
@@ -135,6 +139,8 @@
 			if (abortController?.signal.aborted || isAbortError(err)) return;
 			const { message } = parseErrorContent(err);
 			rowErrors = { ...rowErrors, [id]: message };
+			// Local login owns delayed retries; browser OAuth uses the row Retry action.
+			if (propagateError) throw err;
 		} finally {
 			checking.delete(id);
 		}
@@ -183,26 +189,33 @@
 </script>
 
 <div
-	class={twMerge('colors-background flex min-h-screen items-center justify-center p-4', className)}
+	class={twMerge(
+		embedded
+			? 'w-full min-w-0'
+			: 'colors-background flex min-h-screen items-center justify-center p-4',
+		className
+	)}
 >
-	<div class="popover w-full max-w-lg p-6">
-		<div class="mb-6 flex items-center gap-3">
-			<div class="bg-base-200 shrink-0 rounded-md p-2">
-				{#if parentIcon}
-					<img src={parentIcon} alt={parentDisplayName} class="size-8" />
-				{:else}
-					<Server class="size-8" />
-				{/if}
+	<div class={embedded ? 'w-full min-w-0' : 'popover w-full max-w-lg p-6'}>
+		{#if !embedded}
+			<div class="mb-6 flex items-center gap-3">
+				<div class="bg-base-200 shrink-0 rounded-md p-2">
+					{#if parentIcon}
+						<img src={parentIcon} alt={parentDisplayName} class="size-8" />
+					{:else}
+						<Server class="size-8" />
+					{/if}
+				</div>
+				<h1 class="text-2xl font-semibold">
+					{parentDisplayName}
+				</h1>
 			</div>
-			<h1 class="text-2xl font-semibold">
-				{parentDisplayName}
-			</h1>
-		</div>
 
-		{#if !allAuthenticated}
-			<p class="mb-6 text-sm">
-				{m.mcps_oauth_composite_oauth_description()}
-			</p>
+			{#if !allAuthenticated}
+				<p class="mb-6 text-sm">
+					{m.mcps_oauth_composite_oauth_description()}
+				</p>
+			{/if}
 		{/if}
 
 		{#if loading && pending.length === 0}
@@ -217,52 +230,59 @@
 		{:else}
 			<div class="flex flex-col gap-4">
 				{#each pending as item (item.mcpServerID)}
+					{@const name = componentLabel(item)}
+					{@const icon = item.icon || componentInfos[item.catalogEntryID || '']?.icon}
+					{@const deprecated = componentInfos[item.catalogEntryID || '']?.deprecated}
 					<div
-						class="border-base-400 bg-base-200 flex items-center justify-between rounded-lg border p-4"
+						role="group"
+						aria-label={name}
+						class="dark:bg-base-300 dark:border-base-400 bg-base-100 min-w-0 rounded-lg border border-transparent shadow-sm"
 					>
-						<div class="flex items-center gap-3">
-							{#if item.icon || componentInfos[item.catalogEntryID || '']?.icon}
-								<img
-									src={item.icon || componentInfos[item.catalogEntryID || '']?.icon}
-									alt={m.mcps_oauth_icon_alt()}
-									class="size-6"
-								/>
-							{:else}
-								<Server class="size-6" />
-							{/if}
-							<span class="text-base font-medium">{componentLabel(item)}</span>
-							<McpDeprecatedNotice
-								deprecated={componentInfos[item.catalogEntryID || '']?.deprecated}
-								child
+						{#if isMcpLoginURL(item.authURL)}
+							<McpLocalAuth
+								url={item.authURL}
+								serverName={name}
+								{icon}
+								{deprecated}
+								loading={checking.has(item.mcpServerID)}
+								onComplete={() => checkComponent(item, true)}
 							/>
-						</div>
-						<div class="flex items-center gap-2">
-							{#if checking.has(item.mcpServerID)}
-								<span class="flex items-center gap-2 text-sm" role="status">
-									<Loading class="size-4" />
-									{m.mcps_oauth_composite_oauth_checking()}
-								</span>
-							{:else}
-								<a
-									href={item.authURL}
-									rel="external noopener noreferrer"
-									target="_blank"
-									class="btn btn-primary"
-									onclick={() => recordAttempt(item)}>{m.mcps_oauth_authenticate()}</a
-								>
-								{#if rowErrors[item.mcpServerID]}
-									<button
-										class="btn btn-secondary"
-										type="button"
-										onclick={() => void checkComponent(item)}>{m.mcps_retry()}</button
-									>
+						{:else}
+							<div class="flex min-w-0 flex-wrap items-center gap-3 p-3">
+								{#if icon}
+									<img src={icon} alt={m.mcps_oauth_icon_alt()} class="size-8 shrink-0" />
+								{:else}
+									<Server class="size-8 shrink-0" />
 								{/if}
-							{/if}
-						</div>
+								<span class="min-w-0 flex-1 break-words text-sm font-medium">{name}</span>
+								<McpDeprecatedNotice {deprecated} child />
+								{#if checking.has(item.mcpServerID) || attempted.has(item.mcpServerID)}
+									<span class="flex items-center gap-2 text-sm" role="status">
+										<Loading class="size-4 shrink-0" />{m.mcps_oauth_composite_oauth_checking()}
+									</span>
+								{/if}
+								{#if !checking.has(item.mcpServerID)}
+									<a
+										href={item.authURL}
+										rel="external noopener noreferrer"
+										target="_blank"
+										class="btn btn-primary shrink-0"
+										onclick={() => recordAttempt(item)}>{m.mcps_oauth_authenticate()}</a
+									>
+									{#if rowErrors[item.mcpServerID]}
+										<button
+											class="btn btn-secondary"
+											type="button"
+											onclick={() => void checkComponent(item)}>{m.mcps_retry()}</button
+										>
+									{/if}
+								{/if}
+							</div>
+						{/if}
+						{#if rowErrors[item.mcpServerID]}
+							<p role="alert" class="text-error px-3 pb-3 text-sm">{rowErrors[item.mcpServerID]}</p>
+						{/if}
 					</div>
-					{#if rowErrors[item.mcpServerID]}
-						<p class="text-error mt-2 text-sm">{rowErrors[item.mcpServerID]}</p>
-					{/if}
 				{/each}
 			</div>
 		{/if}

@@ -632,6 +632,7 @@ export interface VMCPComponentStatus {
 }
 
 export interface VMCP extends VMCPManifest {
+	localhostCallbackPaths?: string[];
 	created: string;
 	creatorUserID?: string;
 	deleted?: string;
@@ -758,6 +759,8 @@ export interface MCPResourceRequirements {
 	limits?: MCPResourceRequests;
 }
 export interface RemoteRuntimeConfig {
+	localhostCallbackEnabled?: boolean;
+	localhostCallbackPath?: string;
 	fixedURL?: string;
 	hostname?: string;
 	isTemplate?: boolean;
@@ -766,6 +769,8 @@ export interface RemoteRuntimeConfig {
 	urlTemplate?: string;
 }
 export interface RemoteCatalogConfig {
+	localhostCallbackEnabled?: boolean;
+	localhostCallbackPath?: string;
 	fixedURL?: string;
 	hostname?: string;
 	tunnelName?: string;

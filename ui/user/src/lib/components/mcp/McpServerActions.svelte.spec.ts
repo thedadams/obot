@@ -1,4 +1,4 @@
-import { createMCPCatalogEntry } from '../../../tests/helpers/mcp';
+import { createMCPCatalogEntry, createMCPCatalogServer } from '../../../tests/helpers/mcp';
 import { preparePageData } from '../../../tests/helpers/pageData';
 import { worker } from '../../../tests/mocks/worker';
 import McpServerActions from './McpServerActions.svelte';
@@ -43,4 +43,41 @@ describe('MCP server OAuth setup link', () => {
 		render(McpServerActions, { entry, promptOAuthConfig: true, hideActions: true });
 		await expect.element(page.getByRole('button', { name: 'Clear Credentials' })).toBeVisible();
 	});
+});
+
+for (const kind of ['entry', 'server'] as const) {
+	for (const enabled of [true, false]) {
+		it(`does not advertise a direct URL after launching a ${kind} with localhost callback ${enabled}`, async () => {
+			await preparePageData();
+			const resource =
+				kind === 'entry'
+					? createMCPCatalogEntry({ id: 'local-entry', name: 'Local', runtime: 'remote' })
+					: createMCPCatalogServer({
+							id: 'local-server',
+							name: 'Local',
+							runtime: 'remote',
+							userID: 'user-1'
+						});
+			Object.assign(resource, { connectURL: 'https://obot.example/mcp-connect/local' });
+			resource.manifest.remoteConfig = { localhostCallbackEnabled: enabled };
+			await render(McpServerActions, { [kind]: resource, promptInitialLaunch: true });
+
+			await expect.element(page.getByCSS('#server-action-connection-url')).not.toBeInTheDocument();
+			await expect
+				.element(page.getByRole('link', { name: 'Install the Obot CLI' }))
+				.not.toBeInTheDocument();
+		});
+	}
+}
+
+it('does not advertise a direct URL with a custom callback path', async () => {
+	await preparePageData();
+	const entry = createMCPCatalogEntry({ id: 'custom-entry', name: 'Custom', runtime: 'remote' });
+	Object.assign(entry, { connectURL: 'https://obot.example/mcp-connect/custom' });
+	entry.manifest.remoteConfig = {
+		localhostCallbackEnabled: true,
+		localhostCallbackPath: '/custom/callback'
+	};
+	await render(McpServerActions, { entry, promptInitialLaunch: true });
+	await expect.element(page.getByCSS('#server-action-connection-url')).not.toBeInTheDocument();
 });

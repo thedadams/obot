@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import ResponsiveDialog from '$lib/components/ResponsiveDialog.svelte';
 	import SensitiveInput from '$lib/components/SensitiveInput.svelte';
+	import McpLogin from '$lib/components/mcp/McpLogin.svelte';
 	import CompositeEditTools from '$lib/components/mcp/composite/CompositeEditTools.svelte';
 	import { isMissingRequiredConfigurationField } from '$lib/components/mcp/configurationOptions';
 	import { m } from '$lib/i18n';
@@ -14,6 +15,7 @@
 		ToolOverride,
 		VMCPComponent
 	} from '$lib/services';
+	import { isMcpLoginURL } from '$lib/services/user/mcp';
 	import { toolOverridesFromRows } from '$lib/services/user/mcp';
 	import {
 		catalogConfigurationFields,
@@ -178,10 +180,21 @@
 	}
 
 	function handleVisibilityChange() {
-		if (dialogPhase === 'setup' && document.visibilityState === 'visible' && oauthURL && !loading) {
-			oauthValidating = true;
-			void fetchLiveTools();
+		if (
+			dialogPhase === 'setup' &&
+			document.visibilityState === 'visible' &&
+			oauthURL &&
+			!isMcpLoginURL(oauthURL) &&
+			!loading
+		) {
+			validateAuthentication();
 		}
+	}
+
+	function validateAuthentication() {
+		if (loading) return;
+		oauthValidating = true;
+		return fetchLiveTools();
 	}
 
 	$effect(() => {
@@ -363,11 +376,13 @@
 <ResponsiveDialog
 	bind:this={setupDialog}
 	animate="slide"
-	title={readonly
-		? m.vmcps_view_named_tools({ name: component?.name ?? m.vmcps_mcp_server() })
-		: m.vmcps_configure_named_tools({
-				name: component?.name ?? m.vmcps_mcp_server()
-			})}
+	title={oauthURL && isMcpLoginURL(oauthURL)
+		? m.mcps_login_tools_title({ name: component?.name || m.mcps_login_server() })
+		: readonly
+			? m.vmcps_view_named_tools({ name: component?.name ?? m.vmcps_mcp_server() })
+			: m.vmcps_configure_named_tools({
+					name: component?.name ?? m.vmcps_mcp_server()
+				})}
 	class="md:w-md"
 	onClose={cancelSetup}
 >
@@ -385,22 +400,33 @@
 						name: component?.name ?? configuringEntry.manifest.name ?? ''
 					})}
 				</p>
-			{:else if oauthURL}
+			{:else if oauthURL && !isMcpLoginURL(oauthURL)}
 				<p class="mb-4 text-sm">
 					{m.vmcps_tools_requires_oauth_authentication()}
 				</p>
-			{:else if userFields.length > 0}
+			{:else if !oauthURL && userFields.length > 0}
 				<p class="text-muted-content mb-6 text-sm font-light">
 					{m.vmcps_tools_enter_credentials()}
 				</p>
-			{:else if !needsLiveTools}
+			{:else if !oauthURL && !needsLiveTools}
 				<p class="text-muted-content mb-6 text-sm font-light">
 					{m.vmcps_tools_read_from_stored()}
 				</p>
-			{:else}
+			{:else if !oauthURL}
 				<p class="text-muted-content mb-6 text-sm font-light">
 					{m.vmcps_tools_use_stored_configuration()}
 				</p>
+			{/if}
+
+			{#if oauthURL && isMcpLoginURL(oauthURL)}
+				<McpLogin
+					url={oauthURL}
+					serverName={configuringEntry.manifest.name}
+					purpose="tools"
+					showTitle={false}
+					{loading}
+					onComplete={validateAuthentication}
+				/>
 			{/if}
 
 			{#if !oauthURL && !oauthSetupRequired}
@@ -461,7 +487,7 @@
 			{#if error}
 				<p class="text-error mb-4 text-sm" role="alert">{error}</p>
 			{/if}
-			<div class="flex w-full flex-col gap-2">
+			<div class="mt-4 flex w-full flex-wrap justify-end gap-2">
 				{#if oauthSetupRequired}
 					{#if profile.current.isAdmin?.() && component?.mcpServerCatalogEntryID}
 						<a
@@ -495,7 +521,9 @@
 						{m.vmcps_check_again()}
 					</button>
 				{:else if oauthURL}
-					{#if oauthValidating}
+					{#if isMcpLoginURL(oauthURL)}
+						<!-- The shared login component waits for this attempt to finish. -->
+					{:else if oauthValidating}
 						<button
 							in:fade
 							class="btn btn-primary flex items-center justify-center gap-2"
