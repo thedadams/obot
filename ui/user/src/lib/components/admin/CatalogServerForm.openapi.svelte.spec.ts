@@ -67,7 +67,7 @@ function mockImport() {
 	return request;
 }
 
-it('previews a URL schema, then saves only the source and header prefix', async () => {
+it('trims import and destination URLs, then saves only the source and header prefix', async () => {
 	const imported = mockImport();
 	const saved = vi.fn();
 	worker.use(
@@ -78,7 +78,7 @@ it('previews a URL schema, then saves only the source and header prefix', async 
 	);
 	await openForm();
 	await expect.element(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
-	await page.getByLabelText('Schema URL', { exact: true }).fill(sourceURL);
+	await page.getByLabelText('Schema URL', { exact: true }).fill(`  ${sourceURL}  `);
 	await page.getByRole('button', { name: 'Import schema', exact: true }).click();
 	await expect
 		.element(page.getByRole('status'))
@@ -87,7 +87,7 @@ it('previews a URL schema, then saves only the source and header prefix', async 
 	await expect.element(page.getByLabelText('Value Prefix')).toHaveValue('Bearer ');
 	await page
 		.getByLabelText('API request base URL', { exact: false })
-		.fill('https://override.example.com');
+		.fill('  https://override.example.com  ');
 	await page.getByCSS(`#${CATALOG_SERVER_FIELD_IDS.name}`).fill('Example API');
 	await page.getByCSS(`#${CATALOG_SERVER_FIELD_IDS.shortDescription}`).fill('An example API');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -130,12 +130,12 @@ it('rejects OpenAPI header names that differ only by case', async () => {
 	expect(saved).not.toHaveBeenCalled();
 });
 
-it('keeps Required editable but blocks saving optional OpenAPI credential headers', async () => {
+it('keeps imported headers required by default and allows saving optional headers', async () => {
 	mockImport();
 	const saved = vi.fn();
 	worker.use(
-		http.post('/api/mcp-catalogs/test/entries', async () => {
-			saved();
+		http.post('/api/mcp-catalogs/test/entries', async ({ request }) => {
+			saved(await request.json());
 			return HttpResponse.json(createMCPCatalogEntryResponse);
 		})
 	);
@@ -144,18 +144,36 @@ it('keeps Required editable but blocks saving optional OpenAPI credential header
 	await page.getByRole('button', { name: 'Import schema', exact: true }).click();
 	const required = page.getByRole('switch', { name: 'Required', exact: true });
 	await expect.element(required).toBeEnabled();
+	await expect.element(required).toBeChecked();
 	await required.click();
 	await page.getByCSS(`#${CATALOG_SERVER_FIELD_IDS.shortDescription}`).fill('An example API');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 
+	await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+	expect(saved.mock.calls[0][0].config).toEqual([{ ...suggestedHeader, required: false }]);
+});
+
+it('allows removing schema-suggested credential headers before saving', async () => {
+	mockImport();
+	const saved = vi.fn();
+	worker.use(
+		http.post('/api/mcp-catalogs/test/entries', async ({ request }) => {
+			saved(await request.json());
+			return HttpResponse.json(createMCPCatalogEntryResponse);
+		})
+	);
+	await openForm();
+	await page.getByLabelText('Schema URL', { exact: true }).fill(sourceURL);
+	await page.getByRole('button', { name: 'Import schema', exact: true }).click();
+	await expect.element(page.getByRole('switch', { name: 'Required', exact: true })).toBeChecked();
+	await page.getByRole('button', { name: 'Remove configuration', exact: true }).click();
 	await expect
-		.element(page.getByRole('alert'))
-		.toHaveTextContent('OpenAPI credential headers must be marked Required before saving.');
-	expect(saved).not.toHaveBeenCalled();
-	await required.click();
-	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+		.element(page.getByRole('switch', { name: 'Required', exact: true }))
+		.not.toBeInTheDocument();
+	await page.getByCSS(`#${CATALOG_SERVER_FIELD_IDS.shortDescription}`).fill('An example API');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+	expect(saved.mock.calls[0][0].config).toEqual([]);
 });
 
 it('saves OpenAPI egress domains when network policy is enabled', async () => {
@@ -503,6 +521,31 @@ it('loads an existing entry without a snapshot and submits only its URL on updat
 	await vi.waitFor(() => expect(saved).toHaveBeenCalled());
 	expect(saved.mock.calls[0][0].openAPIConfig).toMatchObject({ source: { url: sourceURL } });
 	expect(saved.mock.calls[0][0].openAPIConfig).not.toHaveProperty('schema');
+});
+
+it('reopens the saved schema destination as an editable value without importing again', async () => {
+	const imported = mockImport();
+	const baseURL = 'https://schema-api.example.com/v2/';
+	const entry = {
+		...createMCPCatalogEntryResponse,
+		manifest: {
+			...createMCPCatalogEntryResponse.manifest,
+			runtime: 'openapi',
+			config: [],
+			openAPIConfig: {
+				source: { url: sourceURL },
+				baseURL
+			}
+		}
+	} as MCPCatalogEntry;
+	await render(CatalogServerForm, { id: 'test', entity: 'catalog', entry });
+	const input = page.getByLabelText('API request base URL', { exact: false });
+	await expect.element(input).toHaveValue(baseURL);
+	await expect.element(input).toBeEnabled();
+	expect(imported).not.toHaveBeenCalled();
+	await input.fill('');
+	await expect.element(input).toHaveValue('');
+	await expect.element(input).not.toBeRequired();
 });
 
 it('does not save the old schema when replacement starts during destination validation', async () => {

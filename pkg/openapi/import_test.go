@@ -209,11 +209,14 @@ func TestUnsupportedDocuments(t *testing.T) {
 			message: "referenced path",
 		},
 		{
-			name: "callback",
+			name: "referenced callback",
 			change: func(d map[string]any) {
-				d["paths"].(map[string]any)["/users"].(map[string]any)["get"].(map[string]any)["callbacks"] = map[string]any{"event": map[string]any{}}
+				d["components"] = map[string]any{"callbacks": map[string]any{"event": map[string]any{}}}
+				d["paths"].(map[string]any)["/users"].(map[string]any)["get"].(map[string]any)["callbacks"] = map[string]any{
+					"event": map[string]any{"$ref": "#/components/callbacks/event"},
+				}
 			},
-			message: "callbacks",
+			message: "referenced callbacks",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
