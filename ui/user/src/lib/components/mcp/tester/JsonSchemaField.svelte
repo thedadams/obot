@@ -3,6 +3,7 @@
 	import JsonSchemaField from './JsonSchemaField.svelte';
 	import { defaultJSONSchemaValue, resolveUnionSchema, type JSONSchema } from './json-schema';
 	import { Plus, Trash2 } from '@lucide/svelte';
+	import { onDestroy, untrack } from 'svelte';
 
 	interface Props {
 		schema: JSONSchema;
@@ -15,6 +16,9 @@
 		// enclosing union's hint.
 		describedBy?: string;
 		onchange: (value: unknown) => void;
+		// Parse errors are separate from values so malformed text cannot select
+		// another union member or make an optional field appear unset.
+		onparseerrorchange?: (fieldID: string, invalid: boolean) => void;
 	}
 
 	let {
@@ -25,7 +29,8 @@
 		required = false,
 		disabled = false,
 		describedBy,
-		onchange
+		onchange,
+		onparseerrorchange
 	}: Props = $props();
 	// Derived from a per-instance unique id rather than `path`: `-` is already the path
 	// separator, so sibling `a-b` and nested `a`/`b` would otherwise share a DOM id.
@@ -42,6 +47,16 @@
 			chosen = { schema, index: union.index };
 		}
 	});
+	let objectJSON = $state(untrack(() => JSON.stringify(value ?? {}, null, 2)));
+	let objectJSONError = $state<string>();
+	let lastEmittedObjectValue: string | undefined;
+	let hasPendingObjectValue = false;
+	$effect(() => {
+		const invalid = !disabled && Boolean(objectJSONError);
+		const notify = onparseerrorchange;
+		untrack(() => notify?.(id, invalid));
+	});
+	onDestroy(() => onparseerrorchange?.(id, false));
 	let enumIndex = $derived(schema.enum?.findIndex((entry) => Object.is(entry, value)) ?? -1);
 	let type = $derived(
 		Array.isArray(schema.type) ? schema.type.find((item) => item !== 'null') : schema.type
@@ -65,6 +80,34 @@
 	function updateProperty(name: string, next: unknown) {
 		onchange({ ...objectValue(), [name]: next });
 	}
+
+	function updateObjectJSON(next: string) {
+		objectJSON = next;
+
+		try {
+			const parsed = JSON.parse(next) as unknown;
+			hasPendingObjectValue = true;
+			lastEmittedObjectValue = JSON.stringify(parsed);
+			onchange(parsed);
+			objectJSONError = undefined;
+		} catch (error) {
+			// Retain the last parsed value so the union keeps its object editor.
+			// The separate parse-error callback prevents that value being submitted.
+			objectJSONError = error instanceof Error ? error.message : m.mcps_tester_invalid_json();
+		}
+	}
+
+	$effect(() => {
+		const serialized = JSON.stringify(value);
+		if (hasPendingObjectValue && serialized === lastEmittedObjectValue) {
+			hasPendingObjectValue = false;
+			return;
+		}
+
+		hasPendingObjectValue = false;
+		objectJSON = JSON.stringify(value ?? {}, null, 2);
+		objectJSONError = undefined;
+	});
 
 	function arrayValue(): unknown[] {
 		return Array.isArray(value) ? value : [];
@@ -105,6 +148,7 @@
 			disabled={disabled || (union.nullable && value === null)}
 			describedBy={[describedBy, alternativesId].filter(Boolean).join(' ') || undefined}
 			{onchange}
+			{onparseerrorchange}
 		/>
 		{#if alternativesId}
 			<p id={alternativesId} class="text-xs text-muted-content">
@@ -117,29 +161,51 @@
 		{/if}
 	</div>
 {:else if type === 'object'}
-	<fieldset
-		class="border-base-300 dark:border-base-400 space-y-4 rounded-lg border p-4"
-		aria-describedby={describedBy}
-	>
-		<legend class="px-1 text-sm font-medium">{label}{required ? ' *' : ''}</legend>
-		{#if schema.description}
-			<p class="text-xs text-muted-content">{schema.description}</p>
-		{/if}
-		{#each Object.entries(schema.properties ?? {}) as [name, property] (name)}
-			<JsonSchemaField
-				schema={property}
-				value={objectValue()[name]}
-				label={property.title || name}
-				path={`${path}-${name}`}
-				required={schema.required?.includes(name)}
+	{#if Object.keys(schema.properties ?? {}).length === 0}
+		<div class="space-y-2">
+			<label for={id} class="block text-sm font-medium">{label}{required ? ' *' : ''}</label>
+			{#if schema.description}
+				<p id={`${id}-description`} class="text-xs text-muted-content">{schema.description}</p>
+			{/if}
+			<textarea
+				{id}
+				class="text-input-filled min-h-32 w-full font-mono text-sm"
+				value={objectJSON}
 				{disabled}
-				onchange={(next) => updateProperty(name, next)}
-			/>
-		{/each}
-		{#if Object.keys(schema.properties ?? {}).length === 0}
-			<p class="text-sm text-muted-content">{m.mcps_tester_no_declared_properties()}</p>
-		{/if}
-	</fieldset>
+				aria-invalid={Boolean(objectJSONError)}
+				aria-describedby={[controlDescribedBy, objectJSONError ? `${id}-error` : undefined]
+					.filter(Boolean)
+					.join(' ') || undefined}
+				oninput={(event) => updateObjectJSON(event.currentTarget.value)}></textarea>
+			{#if objectJSONError}
+				<p id={`${id}-error`} class="text-sm text-error" role="alert">
+					{m.mcps_tester_invalid_json_error({ error: objectJSONError })}
+				</p>
+			{/if}
+		</div>
+	{:else}
+		<fieldset
+			class="border-base-300 dark:border-base-400 space-y-4 rounded-lg border p-4"
+			aria-describedby={describedBy}
+		>
+			<legend class="px-1 text-sm font-medium">{label}{required ? ' *' : ''}</legend>
+			{#if schema.description}
+				<p class="text-xs text-muted-content">{schema.description}</p>
+			{/if}
+			{#each Object.entries(schema.properties ?? {}) as [name, property] (name)}
+				<JsonSchemaField
+					schema={property}
+					value={objectValue()[name]}
+					label={property.title || name}
+					path={`${path}-${name}`}
+					required={schema.required?.includes(name)}
+					{disabled}
+					onchange={(next) => updateProperty(name, next)}
+					{onparseerrorchange}
+				/>
+			{/each}
+		</fieldset>
+	{/if}
 {:else if type === 'array'}
 	<fieldset
 		class="border-base-300 dark:border-base-400 space-y-3 rounded-lg border p-4"
@@ -160,6 +226,7 @@
 						required
 						{disabled}
 						onchange={(next) => updateArray(index, next)}
+						{onparseerrorchange}
 					/>
 				</div>
 				<button
