@@ -20,7 +20,7 @@
 	const CREATOR_FILTER_LABEL_ID = 'vmcp-filter-by-creator-label';
 	const STATUS_FILTER_LABEL_ID = 'vmcp-filter-by-status-label';
 	const SERVER_FILTER_LABEL_ID = 'vmcp-filter-by-server-label';
-	const selectClasses = 'min-h-8 py-1 text-sm bg-base-200 dark:bg-base-100 shadow-inner!';
+	const selectClasses = 'text-sm';
 
 	interface Props {
 		filters: VMcpListSettings;

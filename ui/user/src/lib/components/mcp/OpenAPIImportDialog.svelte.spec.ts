@@ -25,14 +25,19 @@ it('keeps import errors in the modal and allows retry', async () => {
 		onComplete,
 		onCancel: vi.fn()
 	});
+	await expect
+		.element(page.getByRole('button', { name: 'Import schema', exact: true }))
+		.not.toBeInTheDocument();
+	await expect.element(page.getByRole('button', { name: 'Import', exact: true })).toBeDisabled();
 	await page.getByLabelText('Schema URL', { exact: true }).fill('https://example.com/schema.json');
-	await page.getByRole('button', { name: 'Import schema', exact: true }).click();
+	await expect.element(page.getByRole('button', { name: 'Import', exact: true })).toBeEnabled();
+	await page.getByRole('button', { name: 'Import', exact: true }).click();
 	await expect
 		.element(page.getByRole('alert'))
 		.toHaveTextContent('400 /openapi-import: Schema URL is unavailable');
 	expect(onComplete).not.toHaveBeenCalled();
 	fail = false;
-	await page.getByRole('button', { name: 'Import schema', exact: true }).click();
+	await page.getByRole('button', { name: 'Import', exact: true }).click();
 	await vi.waitFor(() =>
 		expect(onComplete).toHaveBeenCalledWith({
 			config: expect.objectContaining({
@@ -43,7 +48,18 @@ it('keeps import errors in the modal and allows retry', async () => {
 	);
 });
 
-it('ignores a pending response after cancelling', async () => {
+it('cancels when Escape closes the dialog', async () => {
+	const onCancel = vi.fn();
+	await render(OpenAPIImportDialog, {
+		onComplete: vi.fn(),
+		onCancel
+	});
+	await expect.element(page.getByRole('dialog')).toBeVisible();
+	await userEvent.keyboard('{Escape}');
+	await vi.waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
+});
+
+it('ignores a pending response when the X button closes the dialog', async () => {
 	let finish!: () => void;
 	const pending = new Promise<void>((resolve) => {
 		finish = resolve;
@@ -63,7 +79,7 @@ it('ignores a pending response after cancelling', async () => {
 		onCancel
 	});
 	await page.getByLabelText('Schema URL', { exact: true }).fill('https://example.com/schema.json');
-	await page.getByRole('button', { name: 'Import schema', exact: true }).click();
+	await page.getByRole('button', { name: 'Import', exact: true }).click();
 	await expect.element(page.getByLabelText('Schema URL', { exact: true })).toBeDisabled();
 	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 	expect(onCancel).toHaveBeenCalledOnce();
@@ -71,15 +87,4 @@ it('ignores a pending response after cancelling', async () => {
 	finish();
 	await vi.waitFor(() => expect(responded).toHaveBeenCalledOnce());
 	expect(onComplete).not.toHaveBeenCalled();
-});
-
-it('cancels when Escape closes the dialog', async () => {
-	const onCancel = vi.fn();
-	await render(OpenAPIImportDialog, {
-		onComplete: vi.fn(),
-		onCancel
-	});
-	await expect.element(page.getByRole('dialog')).toBeVisible();
-	await userEvent.keyboard('{Escape}');
-	await vi.waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
 });
