@@ -53,7 +53,7 @@ func (h *SCIMConnectionHandler) EnablePreview(req api.Context) error {
 // enable SCIM.
 func (h *SCIMConnectionHandler) Enable(req api.Context) error {
 	if !req.UserIsOwner() {
-		return types.NewErrForbidden("only an owner can enable SCIM")
+		return types.NewErrForbidden("%s", apiMessage(req, "scim_enable_owner_only"))
 	}
 
 	// Checking first reports every blocker at once.
@@ -100,7 +100,7 @@ func (h *SCIMConnectionHandler) Review(req api.Context) error {
 func (h *SCIMConnectionHandler) Users(req api.Context) error {
 	provisioned, err := strconv.ParseBool(req.URL.Query().Get("provisioned"))
 	if err != nil {
-		return types.NewErrBadRequest("provisioned must be true or false")
+		return types.NewErrBadRequest("%s", apiMessage(req, "scim_provisioned_boolean"))
 	}
 
 	page, err := h.setup.Users(req.Context(), req.PathValue("id"), provisioned, queryPage(req))
@@ -139,7 +139,7 @@ func (h *SCIMConnectionHandler) Failures(req api.Context) error {
 func (h *SCIMConnectionHandler) Enforce(req api.Context) error {
 	actor := scimActor(req)
 	if !actor.Owner || actor.Bootstrap {
-		return types.NewErrForbidden("only an owner who signed in through the auth provider can enforce SCIM")
+		return types.NewErrForbidden("%s", apiMessage(req, "scim_enforce_owner_provider"))
 	}
 
 	result, err := h.setup.Enforce(req.Context(), req.PathValue("id"), actor)
@@ -154,7 +154,7 @@ func (h *SCIMConnectionHandler) Enforce(req api.Context) error {
 // SCIM failed to delete. They grant nothing, so no resources are cleaned up. Only Owners can delete them.
 func (h *SCIMConnectionHandler) DeleteUnreferencedGroups(req api.Context) error {
 	if !req.UserIsOwner() {
-		return types.NewErrForbidden("only an owner can delete unreferenced groups")
+		return types.NewErrForbidden("%s", apiMessage(req, "scim_delete_owner_only"))
 	}
 
 	result, err := h.setup.DeleteUnreferencedGroups(req.Context(), req.PathValue("id"))
@@ -215,7 +215,7 @@ func (h *SCIMConnectionHandler) RevokePreviousToken(req api.Context) error {
 // Authorization already limits these routes to Owners, so this is a second line of defense.
 func requireSCIMTokenManager(req api.Context) error {
 	if !req.UserIsOwner() {
-		return types.NewErrForbidden("only an owner can manage the SCIM token")
+		return types.NewErrForbidden("%s", apiMessage(req, "scim_token_owner_only"))
 	}
 	return nil
 }

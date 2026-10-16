@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+
+	"github.com/obot-platform/obot/pkg/i18n"
 )
 
 const (
@@ -30,17 +32,18 @@ var (
 
 	oktaDirectoryParameters = []DirectoryParameter{
 		{
-			Name: "OBOT_OKTA_AUTH_PROVIDER_SERVICE_CLIENT_ID",
-			SetupDescription: "Client ID of an Okta API Services app, which Obot uses to fetch each user's groups from the " +
-				"Okta Management API when they sign in.",
-			UnusedDescription: "Not used: Okta provisions users and groups through SCIM, so Obot no longer calls the " +
-				"Okta Management API. You can remove it, then delete the API Services app in Okta.",
+			Name:               "OBOT_OKTA_AUTH_PROVIDER_SERVICE_CLIENT_ID",
+			SetupDescription:   i18n.Text("en", "okta_client_id_setup"),
+			SetupTranslations:  i18n.Locales("okta_client_id_setup"),
+			UnusedDescription:  i18n.Text("en", "okta_parameter_unused"),
+			UnusedTranslations: i18n.Locales("okta_parameter_unused"),
 		},
 		{
-			Name:             "OBOT_OKTA_AUTH_PROVIDER_SERVICE_PRIVATE_KEY",
-			SetupDescription: "PEM-encoded RSA private key of the Okta API Services app.",
-			UnusedDescription: "Not used: Okta provisions users and groups through SCIM, so Obot no longer calls the " +
-				"Okta Management API. You can remove it, then delete the API Services app in Okta.",
+			Name:               "OBOT_OKTA_AUTH_PROVIDER_SERVICE_PRIVATE_KEY",
+			SetupDescription:   i18n.Text("en", "okta_private_key_setup"),
+			SetupTranslations:  i18n.Locales("okta_private_key_setup"),
+			UnusedDescription:  i18n.Text("en", "okta_parameter_unused"),
+			UnusedTranslations: i18n.Locales("okta_parameter_unused"),
 		},
 	}
 )

@@ -14,6 +14,7 @@ import (
 	"github.com/obot-platform/obot/pkg/controller/handlers/providerconfigurationchange"
 	gclient "github.com/obot-platform/obot/pkg/gateway/client"
 	gatewaytypes "github.com/obot-platform/obot/pkg/gateway/types"
+	"github.com/obot-platform/obot/pkg/i18n"
 	scimsetup "github.com/obot-platform/obot/pkg/scim/setup"
 	v1 "github.com/obot-platform/obot/pkg/storage/apis/obot.obot.ai/v1"
 	"github.com/obot-platform/obot/pkg/system"
@@ -393,6 +394,18 @@ func TestSCIMEnableHandler(t *testing.T) {
 	assert.Contains(t, httpErr.Message, "already provisions users and groups through SCIM")
 	s.requireNoChange()
 
+	// The same blocker is localized in both the preview data and the enable error.
+	req, rec = s.scimContext(http.MethodGet, "/api/scim-connections/enable-preview", "", admin)
+	req.Request = req.WithContext(i18n.WithLocale(req.Context(), "ko"))
+	require.NoError(t, h.EnablePreview(req))
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &preview))
+	assert.Contains(t, preview.Blockers[0], "SCIM으로 사용자와 그룹을 프로비저닝")
+	req, _ = s.scimContext(http.MethodPost, "/api/scim-connections", "", owner)
+	req.Request = req.WithContext(i18n.WithLocale(req.Context(), "ko"))
+	require.ErrorAs(t, h.Enable(req), &httpErr)
+	assert.Contains(t, httpErr.Message, "SCIM으로 사용자와 그룹을 프로비저닝")
+	s.requireNoChange()
+
 	// Only Owners can delete the unreferenced groups.
 	req, _ = s.scimContext(http.MethodPost, "/api/scim-connections/"+result.Connection.ID+"/delete-unreferenced-groups", "", admin)
 	req.SetPathValue("id", result.Connection.ID)
@@ -450,9 +463,11 @@ func TestSCIMEnableHandlerReportsTheControllersRefusal(t *testing.T) {
 
 func TestWaitForProviderConfigurationChangeAnswersWithTheRecordedStatus(t *testing.T) {
 	tests := []struct {
-		name     string
-		status   v1.ProviderConfigurationChangeStatus
-		wantCode int
+		name        string
+		status      v1.ProviderConfigurationChangeStatus
+		wantCode    int
+		locale      string
+		wantMessage string
 	}{
 		{
 			name: "a refusal without a status is a bad request",
@@ -469,6 +484,24 @@ func TestWaitForProviderConfigurationChangeAnswersWithTheRecordedStatus(t *testi
 			},
 			wantCode: http.StatusConflict,
 		},
+		{
+			name: "catalog references in controller errors are resolved in English",
+			status: v1.ProviderConfigurationChangeStatus{
+				Error: "${okta_auth_provider_name} is not configured; a switch to ${github_auth_provider_name} is staged",
+			},
+			wantCode:    http.StatusBadRequest,
+			wantMessage: "Okta is not configured; a switch to GitHub is staged",
+		},
+		{
+			name: "catalog references in controller errors use the request locale",
+			status: v1.ProviderConfigurationChangeStatus{
+				Error:     "${okta_auth_provider_name}: ${okta_auth_provider_client_id_friendly_name} is missing",
+				ErrorCode: http.StatusConflict,
+			},
+			locale:      "ko",
+			wantCode:    http.StatusConflict,
+			wantMessage: "공급자 구성을 변경하지 못했습니다: Okta: 클라이언트 ID is missing",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -481,10 +514,15 @@ func TestWaitForProviderConfigurationChangeAnswersWithTheRecordedStatus(t *testi
 			require.NoError(t, s.storage.Create(t.Context(), change))
 
 			req, _ := s.scimContext(http.MethodPost, "/api/auth-providers/okta-auth-provider/configure", "", nil)
+			req.Request = req.WithContext(i18n.WithLocale(req.Context(), tt.locale))
 			var httpErr *clienttypes.ErrHTTP
 			require.ErrorAs(t, waitForProviderConfigurationChange(req, change), &httpErr)
 			assert.Equal(t, tt.wantCode, httpErr.Code)
-			assert.Equal(t, tt.status.Error, httpErr.Message)
+			wantMessage := tt.wantMessage
+			if wantMessage == "" {
+				wantMessage = tt.status.Error
+			}
+			assert.Equal(t, wantMessage, httpErr.Message)
 		})
 	}
 }
