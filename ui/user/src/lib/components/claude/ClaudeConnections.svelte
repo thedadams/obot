@@ -1,11 +1,15 @@
 <script lang="ts">
 	import CopyField from '$lib/components/CopyField.svelte';
 	import { m } from '$lib/i18n';
-	import { doGet } from '$lib/services/http';
+	import {
+		UserService,
+		type ClaudeSession,
+		type ClaudeConfig,
+		type ClaudeEnvironment
+	} from '$lib/services';
 	import { COMMON_AI_CLIENTS_MAP, AiClient } from '$lib/services/user/constants';
 	import { profile } from '$lib/stores';
 	import { formatTimeAgo } from '$lib/time';
-	import type { ClaudeConfig, ClaudeEnvironment } from './types';
 	import { Pencil } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { twMerge } from 'tailwind-merge';
@@ -13,13 +17,7 @@
 	let { onEdit }: { onEdit: (environment: ClaudeEnvironment) => void } = $props();
 
 	let config = $state<ClaudeConfig>({ enabled: false });
-	let sessions = $state<
-		{
-			metadata: { deletionTimestamp?: string };
-			spec: { claudeEnvironment: string; claudeDone?: boolean; claudeFinishedAt?: string };
-			status: { state?: string };
-		}[]
-	>([]);
+	let sessions = $state<ClaudeSession[]>([]);
 	let statsLoaded = $state(false);
 	let statsError = $state(false);
 	let refreshingStats = false;
@@ -53,10 +51,10 @@
 		refreshingStats = true;
 
 		try {
-			const response = (await doGet(admin ? '/claude-sessions?all=true' : '/claude-sessions', {
+			sessions = await UserService.listClaudeSessions({
+				all: admin,
 				dontLogErrors: true
-			})) as { items: typeof sessions };
-			sessions = response.items;
+			});
 			statsLoaded = true;
 			statsError = false;
 		} catch {
@@ -67,7 +65,7 @@
 	}
 
 	async function load() {
-		config = (await doGet('/claude-environments')) as ClaudeConfig;
+		config = await UserService.getClaudeConfig();
 		void refreshStats();
 	}
 
