@@ -3,9 +3,7 @@ package agentinstance
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 	pb "github.com/obot-platform/obot/pkg/substrate/ateapipb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"gorm.io/gorm"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -149,7 +146,7 @@ func (h *Handler) resumeClaude(ctx context.Context, req router.Request, instance
 		return previous.State, err
 	}
 
-	_, err := h.Substrate.Control.ResumeActor(ctx, &pb.ResumeActorRequest{Actor: substrate.Ref(instance)})
+	err := h.resumeActor(ctx, substrate.Ref(instance))
 	if status.Code(err) == codes.ResourceExhausted {
 		// Capacity rejection happens before the runner starts, so the order is unused.
 		instance.Status.ClaudeStarted = false
@@ -170,9 +167,11 @@ func (h *Handler) reconcileClaude(ctx context.Context, instance *v1.AgentInstanc
 	}
 	state := actor.GetStatus().GetState()
 	ref := substrate.Ref(instance)
+	if recovering, err := h.recoverResume(ctx, instance, ref, state); recovering {
+		return "Resuming", err
+	}
 	if instance.Spec.ClaudeDone {
-		if state == pb.ActorState_ACTOR_STATE_RUNNING {
-			_, err = h.Substrate.Control.SuspendActor(ctx, &pb.SuspendActorRequest{Actor: ref})
+		if suspending, err := h.suspendClaude(ctx, ref, state); suspending {
 			return "Suspending", err
 		}
 	} else if state == pb.ActorState_ACTOR_STATE_PAUSED || state == pb.ActorState_ACTOR_STATE_SUSPENDED {
@@ -184,25 +183,49 @@ func (h *Handler) reconcileClaude(ctx context.Context, instance *v1.AgentInstanc
 	return strings.TrimPrefix(state.String(), "ACTOR_STATE_"), nil
 }
 
+// resumeActor resumes an execution's actor. Substrate restores the actor during
+// ResumeActor, which can outlast the reconcile's deadline, and a canceled resume leaves the
+// actor RESUMING without a running workload. So the call gets its own deadline.
+func (h *Handler) resumeActor(ctx context.Context, ref *pb.ObjectRef) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer cancel()
+	_, err := h.Substrate.Control.ResumeActor(ctx, &pb.ResumeActorRequest{Actor: ref})
+	return err
+}
+
+// recoverResume resumes a started execution's actor again when an earlier resume was
+// interrupted, which leaves the actor RESUMING. Substrate's resume workflow is idempotent and
+// picks up where the interrupted one stopped. It reports false when there is nothing to
+// recover.
+func (h *Handler) recoverResume(ctx context.Context, instance *v1.AgentInstance, ref *pb.ObjectRef, state pb.ActorState) (bool, error) {
+	if state != pb.ActorState_ACTOR_STATE_RESUMING || !instance.Status.ClaudeStarted || instance.Spec.ClaudeDone {
+		return false, nil
+	}
+	return true, h.resumeActor(ctx, ref)
+}
+
+// suspendClaude suspends a finished execution's actor. It reports false when the actor
+// needs no suspend. Substrate checkpoints the actor during SuspendActor, which can outlast
+// the reconcile's deadline, and a canceled suspend leaves the actor SUSPENDING. So the call
+// gets its own deadline, and SUSPENDING actors are suspended again: Substrate resumes the
+// interrupted suspend.
+func (h *Handler) suspendClaude(ctx context.Context, ref *pb.ObjectRef, state pb.ActorState) (bool, error) {
+	if state != pb.ActorState_ACTOR_STATE_RUNNING && state != pb.ActorState_ACTOR_STATE_SUSPENDING {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer cancel()
+	_, err := h.Substrate.Control.SuspendActor(ctx, &pb.SuspendActorRequest{Actor: ref})
+	return true, err
+}
+
 func (h *Handler) Cleanup(req router.Request, resp router.Response) error {
 	instance := req.Object.(*v1.AgentInstance)
 	ctx, cancel := context.WithTimeout(req.Ctx, 30*time.Second)
 	defer cancel()
 
 	revoke := func() error {
-		credential, err := h.Gateway.RevealCredential(ctx, []string{"substrate-agent"}, instance.Name)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		keyID, err := strconv.ParseUint(credential.Secrets["keyID"], 10, 64)
-		if err != nil {
-			return err
-		}
-		return h.Gateway.RevokeAPIKeyByID(ctx, uint(keyID))
+		return h.Gateway.RevokeClaudeCredentials(ctx, instance.Name)
 	}
 	var err error
 	if instance.Spec.ClaudeOrder != "" {
@@ -223,6 +246,9 @@ func (h *Handler) Cleanup(req router.Request, resp router.Response) error {
 		}
 	}
 	_, err = h.Gateway.DeleteCredential(ctx, "substrate-agent", instance.Name)
+	if err == nil {
+		_, err = h.Gateway.DeleteCredential(ctx, client.ClaudeLLMCredentialContext, instance.Name)
+	}
 	if err == nil && instance.Spec.ClaudeOrder != "" {
 		_, err = h.Gateway.DeleteCredential(ctx, "claude-runner", instance.Name)
 	}
