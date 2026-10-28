@@ -473,9 +473,9 @@
 	}
 
 	// Saves the local auth provider's email-domain config. Returns an error message to show inside
-	// the local auth modal, or undefined on success. The local provider manages its own users, so
-	// unlike the OAuth providers it doesn't hand off to the owner-setup flow here — that happens
-	// when the modal closes with at least one user.
+	// the local auth modal, or undefined on success. Users are managed on the Users page, so unlike
+	// the OAuth providers this doesn't hand off to owner setup here — that happens when the modal
+	// closes with at least one local user.
 	async function handleLocalAuthConfigure(
 		form: Record<string, string>
 	): Promise<string | undefined> {
@@ -532,6 +532,7 @@
 		} catch (err) {
 			confirmSwitch = false;
 			switchError = parseErrorContent(err).message;
+			providerConfigure?.open();
 		} finally {
 			switching = false;
 		}
@@ -635,8 +636,8 @@
 			}
 		}
 
-		// A staged Local provider is past the step its own dialog covers, so resuming goes to the
-		// sign-in that proves it rather than back to editing users.
+		// A staged Local provider is past the settings this dialog edits, so resuming goes to the
+		// sign-in that proves it rather than back to the domain configuration.
 		if (authProvider.id === CommonAuthProviderIds.LOCAL && !authProvider.staged) {
 			setupTempLoginUrl = '';
 			localAuthConfigureOpen = true;
@@ -644,14 +645,6 @@
 		} else {
 			providerConfigure?.open();
 		}
-	}
-
-	function handleManageLocalUsers() {
-		const local = authProviders.find((provider) => provider.id === CommonAuthProviderIds.LOCAL);
-		if (!local) return;
-
-		setupSignInDialog?.close();
-		handleClickConfigure(local);
 	}
 
 	// Local's first step lives in its own dialog, so going back from the sign-in step has to hand
@@ -678,8 +671,8 @@
 			await prepareOwnerSetup();
 		}
 
-		// Local manages its users in its own dialog, so that dialog stands in for the first step of
-		// a switch. Without this handoff the settings stage and the flow stops there.
+		// Local's domain dialog is the first step of a switch. Without this handoff the settings
+		// stage and the flow stops there. Users for the sign-in are created on the Users page.
 		await refreshAuthProviders();
 		const local = authProviders.find(
 			(provider) => provider.id === CommonAuthProviderIds.LOCAL && provider.staged
@@ -869,7 +862,14 @@
 			<ArrowLeft class="size-4" />
 			{m.identity_access_auth_providers_step_signin()}
 		</button>
-		<button class="btn btn-primary" disabled={switching} onclick={() => (confirmSwitch = true)}>
+		<button
+			class="btn btn-primary"
+			disabled={switching}
+			onclick={() => {
+				providerConfigure?.close();
+				confirmSwitch = true;
+			}}
+		>
 			{m.identity_access_auth_providers_switch_to({ name: `${configuringAuthProvider?.name}` })}
 		</button>
 	{/if}
@@ -962,15 +962,14 @@
 
 <LocalAuthConfigure
 	required={!!showInitialAuthProvider}
+	switchingProvider={!!activeProvider && activeProvider.id !== CommonAuthProviderIds.LOCAL}
 	animate={showInitialAuthProvider ? 'slide' : undefined}
 	bind:this={localAuthConfigure}
 	provider={configuringAuthProvider}
 	values={configuringAuthProviderValues}
 	readonly={profile.current.isAdminReadonly?.()}
 	onConfigure={handleLocalAuthConfigure}
-	bootstrap={isBootstrapUser}
 	onClose={handleLocalAuthClose}
-	switching={atLeastOneConfigured && activeProvider?.id !== CommonAuthProviderIds.LOCAL}
 />
 
 <Confirm
@@ -986,7 +985,10 @@
 	cancelText={m.common_cancel()}
 	loading={switching}
 	onsuccess={handleActivateStagedProvider}
-	oncancel={() => (confirmSwitch = false)}
+	oncancel={() => {
+		confirmSwitch = false;
+		providerConfigure?.open();
+	}}
 />
 
 <Confirm
@@ -1073,7 +1075,6 @@
 		{explicitOwners}
 		provider={configuringAuthProvider}
 		tempLoginUrl={setupTempLoginUrl}
-		onManageLocalUsers={isLocalSetup ? handleManageLocalUsers : undefined}
 		showTitle={false}
 	/>
 </ResponsiveDialog>
