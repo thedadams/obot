@@ -310,6 +310,11 @@ const sidebars = {
 					"label": "Okta SCIM provisioning"
 				},
 				{
+					"type": "doc",
+					"id": "configuration/onelogin-scim",
+					"label": "OneLogin SCIM provisioning"
+				},
+				{
 					"type": "category",
 					"label": "Cloud deployments",
 					"collapsible": false,
