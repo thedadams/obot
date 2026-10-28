@@ -1,4 +1,4 @@
-import { goto, replaceState } from '$app/navigation';
+import { goto } from '$app/navigation';
 import { page as appPage } from '$app/state';
 import { Group, UserService, type ClaudeSession, type OrgUser } from '$lib/services';
 import { createMockProfile, preparePageData } from '../../../tests/helpers/pageData';
@@ -8,12 +8,26 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, render } from 'vitest-browser-svelte';
 import { page, userEvent } from 'vitest/browser';
 
-vi.mock('$app/navigation', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('$app/navigation')>();
+vi.mock('$app/state', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$app/state')>();
+	const { createAppState } = await import('../../../tests/helpers/navigation.svelte');
+	return createAppState(actual);
+});
+
+vi.mock('$app/navigation', async () => {
+	const { applyTestGoto } = await import('../../../tests/helpers/navigation.svelte');
 	return {
-		...actual,
-		goto: vi.fn(),
-		replaceState: vi.fn()
+		goto: vi.fn((url: string | URL) => applyTestGoto(url)),
+		invalidate: vi.fn(),
+		invalidateAll: vi.fn(),
+		preloadCode: vi.fn(),
+		preloadData: vi.fn(),
+		beforeNavigate: vi.fn(),
+		afterNavigate: vi.fn(),
+		onNavigate: vi.fn(),
+		pushState: vi.fn(),
+		replaceState: vi.fn(),
+		disableScrollHandling: vi.fn()
 	};
 });
 
@@ -31,13 +45,13 @@ const repository = 'https://github.com/obot-platform/obot (main)';
 const slackSummary = 'Donnie Adams @thedadams · #craig-test';
 
 beforeEach(() => {
-	for (const key of sessionUrlKeys) appPage.url.searchParams.delete(key);
+	for (const key of sessionUrlKeys) (appPage.url as URL).searchParams.delete(key);
 });
 
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
-	for (const key of sessionUrlKeys) appPage.url.searchParams.delete(key);
+	for (const key of sessionUrlKeys) (appPage.url as URL).searchParams.delete(key);
 });
 
 function mailboxSession(): ClaudeSession {
@@ -96,35 +110,38 @@ it('keeps repository and slack details on the session card', async () => {
 		.toHaveAttribute('href', 'https://acorn-io.slack.com/archives/C123/p123?thread_ts=1.23');
 });
 
-it('replaces the search url without navigating and keeps focus when searching and clearing', async () => {
-	appPage.url.searchParams.set('status', 'suspended');
+it('updates the search url and keeps focus when searching and clearing', async () => {
+	(appPage.url as URL).searchParams.set('status', 'suspended');
 	await renderComparableSessions();
 	const search = page.getByRole('textbox');
 	vi.mocked(goto).mockClear();
-	vi.mocked(replaceState).mockClear();
 
 	await search.fill('Alpha, agent');
 	await vi.waitFor(() => {
-		expect(appPage.url.searchParams.get('query')).toBe('Alpha, agent');
-		expect(replaceState).toHaveBeenCalled();
+		expect((appPage.url as URL).searchParams.get('query')).toBe('Alpha, agent');
+		expect(goto).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ replace: true })
+		);
 	});
-	const [url] = vi.mocked(replaceState).mock.lastCall!;
+	const [url] = vi.mocked(goto).mock.lastCall!;
 	expect(String(url)).toContain('query=Alpha%2C+agent');
-	expect(appPage.url.searchParams.get('status')).toBe('suspended');
-	expect(goto).not.toHaveBeenCalled();
+	expect((appPage.url as URL).searchParams.get('status')).toBe('suspended');
 	await expect.element(search).toHaveFocus();
 	await expect.element(page.getByText('Alpha agent', { exact: true })).not.toBeInTheDocument();
 
-	vi.mocked(replaceState).mockClear();
+	vi.mocked(goto).mockClear();
 	await search.fill('');
 	await vi.waitFor(() => {
-		expect(appPage.url.searchParams.has('query')).toBe(false);
-		expect(replaceState).toHaveBeenCalled();
+		expect((appPage.url as URL).searchParams.has('query')).toBe(false);
+		expect(goto).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ replace: true })
+		);
 	});
-	const [clearedUrl] = vi.mocked(replaceState).mock.lastCall!;
+	const [clearedUrl] = vi.mocked(goto).mock.lastCall!;
 	expect(String(clearedUrl)).not.toContain('query=');
-	expect(appPage.url.searchParams.get('status')).toBe('suspended');
-	expect(goto).not.toHaveBeenCalled();
+	expect((appPage.url as URL).searchParams.get('status')).toBe('suspended');
 	await expect.element(search).toHaveFocus();
 	await expect.element(page.getByText('Alpha agent', { exact: true })).toBeVisible();
 });
@@ -249,8 +266,8 @@ async function rowTop(name: string) {
 }
 
 it('applies status filters from the url to the table and settings', async () => {
-	appPage.url.searchParams.set('variant', 'table');
-	appPage.url.searchParams.set('status', 'suspended');
+	(appPage.url as URL).searchParams.set('variant', 'table');
+	(appPage.url as URL).searchParams.set('status', 'suspended');
 	await renderComparableSessions();
 
 	await expect.element(page.getByText('Alpha agent', { exact: true })).toBeVisible();
@@ -266,7 +283,7 @@ it('keeps table status filters and settings pills on the same url value', async 
 	await page.getByRole('combobox', { name: 'Filter by Status...' }).click();
 	await page.getByRole('button', { name: 'Suspended', exact: true }).click();
 
-	expect(appPage.url.searchParams.get('status')).toBe('suspended');
+	expect((appPage.url as URL).searchParams.get('status')).toBe('suspended');
 	await expect.element(page.getByText('Zulu agent', { exact: true })).not.toBeInTheDocument();
 	await expect.element(page.getByRole('button', { name: 'Remove Suspended' })).toBeVisible();
 	await dismissOverlays();
@@ -289,7 +306,7 @@ it('filters by user from settings with the same id the table uses', async () => 
 	await page.getByRole('combobox', { name: 'Filter By User' }).click();
 	await page.getByRole('button', { name: 'Bea Zulu (bea@example.com)', exact: true }).click();
 
-	expect(appPage.url.searchParams.get('user')).toBe('user-bea');
+	expect((appPage.url as URL).searchParams.get('user')).toBe('user-bea');
 	await userEvent.keyboard('{Escape}');
 	await expect.element(page.getByText('Alpha agent', { exact: true })).not.toBeInTheDocument();
 	await expect.element(page.getByText('Zulu agent', { exact: true })).toBeVisible();
@@ -305,8 +322,8 @@ it('writes table name sorting to the url and the settings sort controls', async 
 
 	await page.getByRole('columnheader', { name: 'Name', exact: true }).click();
 
-	expect(appPage.url.searchParams.get('sort')).toBe('displayName');
-	expect(appPage.url.searchParams.get('sortDirection')).toBe('asc');
+	expect((appPage.url as URL).searchParams.get('sort')).toBe('displayName');
+	expect((appPage.url as URL).searchParams.get('sortDirection')).toBe('asc');
 	expect(await rowTop('Alpha agent')).toBeLessThan(await rowTop('Zulu agent'));
 
 	await page.getByRole('button', { name: 'Filters' }).click();

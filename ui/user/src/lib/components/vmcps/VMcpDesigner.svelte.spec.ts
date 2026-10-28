@@ -30,12 +30,20 @@ vi.mock('$app/state', async (importOriginal) => {
 	return createAppState(actual);
 });
 
-vi.mock('$app/navigation', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('$app/navigation')>();
+vi.mock('$app/navigation', async () => {
 	const { applyTestGoto } = await import('../../../tests/helpers/navigation.svelte');
 	return {
-		...actual,
-		goto: (url: string | URL) => applyTestGoto(url)
+		goto: (url: string | URL) => applyTestGoto(url),
+		invalidate: vi.fn(),
+		invalidateAll: vi.fn(),
+		preloadCode: vi.fn(),
+		preloadData: vi.fn(),
+		beforeNavigate: vi.fn(),
+		afterNavigate: vi.fn(),
+		onNavigate: vi.fn(),
+		pushState: vi.fn(),
+		replaceState: vi.fn(),
+		disableScrollHandling: vi.fn()
 	};
 });
 
@@ -234,12 +242,12 @@ async function pressCard(locator: ReturnType<typeof page.getByRole>, pointerId: 
 
 describe('VMcpDesigner.svelte', () => {
 	afterEach(() => {
-		appPage.url.searchParams.delete('view');
-		appPage.url.searchParams.delete('inspector');
-		appPage.url.searchParams.delete('connect');
-		appPage.url.searchParams.delete('profile');
-		appPage.url.searchParams.delete('tab');
-		appPage.url.searchParams.delete('modify-tools');
+		(appPage.url as URL).searchParams.delete('view');
+		(appPage.url as URL).searchParams.delete('inspector');
+		(appPage.url as URL).searchParams.delete('connect');
+		(appPage.url as URL).searchParams.delete('profile');
+		(appPage.url as URL).searchParams.delete('tab');
+		(appPage.url as URL).searchParams.delete('modify-tools');
 		vmcpInstances.current = { items: [], loading: false };
 		responsive.isMobile = false;
 		finishVMcpCreateHandoff();
@@ -262,7 +270,7 @@ describe('VMcpDesigner.svelte', () => {
 
 		it('opens the tool editor from modify-tools and clears the param when dismissed', async () => {
 			const vmcp = createIssueTrackerVMcp(toolOverrides);
-			appPage.url.searchParams.set('modify-tools', `component-${componentEntry.id}`);
+			(appPage.url as URL).searchParams.set('modify-tools', `component-${componentEntry.id}`);
 			await renderDesigner([componentEntry], vmcp);
 
 			await expect.element(page.getByRole('button', { name: 'Refresh tools' })).toBeVisible();
@@ -271,7 +279,7 @@ describe('VMcpDesigner.svelte', () => {
 			await expect
 				.element(page.getByRole('button', { name: 'Refresh tools' }))
 				.not.toBeInTheDocument();
-			expect(appPage.url.searchParams.get('modify-tools')).toBeNull();
+			expect((appPage.url as URL).searchParams.get('modify-tools')).toBeNull();
 		});
 
 		it('renames the component and its tool prefix from Edit Details', async () => {
@@ -777,8 +785,24 @@ describe('VMcpDesigner.svelte', () => {
 			await expect
 				.element(page.getByRole('combobox', { name: 'API token policy' }))
 				.toHaveValue('userAllowed');
+			const configuration = page.getByRole('dialog', { name: 'Supply Configuration' });
+
+			async function waitForConfigurationAnimations() {
+				await tick();
+				await Promise.all(
+					configuration
+						.element()
+						.getAnimations({ subtree: true })
+						.map((animation) => animation.finished)
+				);
+			}
+
+			await waitForConfigurationAnimations();
 
 			await page.getByRole('button', { name: 'Cancel' }).click();
+			await expect
+				.element(page.getByRole('dialog', { name: 'Supply Configuration' }))
+				.not.toBeInTheDocument();
 			await expect
 				.element(page.getByRole('button', { name: 'Modify Tools' }))
 				.not.toBeInTheDocument();
@@ -793,6 +817,7 @@ describe('VMcpDesigner.svelte', () => {
 			await expect.element(advanced).toBeInTheDocument();
 			const advancedInput = advanced.element() as HTMLInputElement;
 			if (!advancedInput.checked) advancedInput.click();
+			await waitForConfigurationAnimations();
 			await page.getByRole('checkbox', { name: 'Force single-user' }).click();
 			await page.getByRole('button', { name: 'Save' }).click();
 
@@ -817,7 +842,7 @@ describe('VMcpDesigner.svelte', () => {
 
 		it('opens tool setup from modify-tools', async () => {
 			const vmcp = createIssueTrackerVMcp();
-			appPage.url.searchParams.set('modify-tools', `component-${componentEntry.id}`);
+			(appPage.url as URL).searchParams.set('modify-tools', `component-${componentEntry.id}`);
 			await renderDesigner([componentEntry], vmcp);
 
 			await expect
@@ -2298,7 +2323,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('opens profiles as readonly for a catalog-synced vMCP', async () => {
-			appPage.url.searchParams.set('view', 'profiles');
+			(appPage.url as URL).searchParams.set('view', 'profiles');
 			const vmcp = { ...orgVMcp(), sourceURL: 'https://github.com/example/catalog' };
 			await renderDesigner([componentEntry], vmcp);
 
@@ -2407,7 +2432,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('opens profiles as readonly for a readonly admin', async () => {
-			appPage.url.searchParams.set('view', 'profiles');
+			(appPage.url as URL).searchParams.set('view', 'profiles');
 			await renderDesigner([componentEntry], orgVMcp(), { groups: [Group.AUDITOR] });
 
 			await expectViewTabs(['Designer', 'Profiles', 'Inspector']);
@@ -2566,7 +2591,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('stays on the graph when the URL asks for profiles', async () => {
-			appPage.url.searchParams.set('view', 'profiles');
+			(appPage.url as URL).searchParams.set('view', 'profiles');
 			await renderDesigner([componentEntry], sharedVMcp(), { groups: [Group.USER] });
 
 			await expect.element(page.getByText('GitHub').first()).toBeVisible();
@@ -2580,7 +2605,7 @@ describe('VMcpDesigner.svelte', () => {
 	describe('tester view', () => {
 		it('resumes the Test connection after returning from administrator OAuth', async () => {
 			const vmcp = createIssueTrackerVMcp();
-			appPage.url.searchParams.set('inspector', vmcp.id);
+			(appPage.url as URL).searchParams.set('inspector', vmcp.id);
 			await renderDesigner([componentEntry], vmcp);
 
 			await expect.element(page.getByRole('button', { name: 'Continue' })).toBeVisible();
@@ -2602,7 +2627,7 @@ describe('VMcpDesigner.svelte', () => {
 					return new HttpResponse(null, { status: 500 });
 				})
 			);
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 
 			await renderDesigner([componentEntry], createIssueTrackerVMcp(), {
 				instances: [instance]
@@ -2618,7 +2643,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('shows the launch notice when the vMCP has no instance', async () => {
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 			await renderDesigner([componentEntry], createIssueTrackerVMcp());
 
 			await expect
@@ -2629,7 +2654,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('opens inspector for a non-admin owner without offering profiles', async () => {
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 			await renderDesigner([componentEntry], personalVMcp(), { groups: [Group.USER] });
 
 			await expect.element(page.getByRole('button', { name: 'Start Session' })).toBeVisible();
@@ -2638,7 +2663,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('opens inspector for a non-admin on a shared vMCP without offering profiles', async () => {
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 			await renderDesigner([componentEntry], orgVMcp(), { groups: [Group.USER] });
 
 			await expect.element(page.getByRole('button', { name: 'Start Session' })).toBeVisible();
@@ -2647,7 +2672,7 @@ describe('VMcpDesigner.svelte', () => {
 		});
 
 		it('stays on the graph when a viewer asks for inspector', async () => {
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 			await renderDesigner([componentEntry], personalVMcp('someone-else'), {
 				groups: [Group.USER]
 			});
@@ -2726,8 +2751,8 @@ describe('VMcpDesigner.svelte', () => {
 				http.get(`/mcp-connect/${instance.id}`, () => new HttpResponse(null, { status: 405 }))
 			);
 
-			appPage.url.searchParams.set('view', 'inspector');
-			appPage.url.searchParams.set('tab', 'tools');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('tab', 'tools');
 			await renderDesigner([componentEntry], vmcp);
 
 			await page.getByRole('button', { name: 'Start Session' }).click();
@@ -2761,7 +2786,7 @@ describe('VMcpDesigner.svelte', () => {
 		}, 5000);
 
 		it('starts ConnectVMcp initLaunch from the tester Launch button', async () => {
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 			await renderDesigner([componentEntry], createIssueTrackerVMcp());
 
 			await page.getByRole('button', { name: 'Start Session' }).click();
@@ -2820,7 +2845,7 @@ describe('VMcpDesigner.svelte', () => {
 					})
 				)
 			);
-			appPage.url.searchParams.set('view', 'inspector');
+			(appPage.url as URL).searchParams.set('view', 'inspector');
 
 			await renderDesigner([componentEntry], vmcp, { instances: [instance] });
 
@@ -2854,7 +2879,7 @@ describe('VMcpDesigner.svelte', () => {
 
 		it('leaves the designer from the profiles list', async () => {
 			const onBack = vi.fn();
-			appPage.url.searchParams.set('view', 'profiles');
+			(appPage.url as URL).searchParams.set('view', 'profiles');
 			await renderDesigner([componentEntry], createIssueTrackerVMcp(), { onBack });
 
 			await expect.element(page.getByRole('button', { name: 'Create profile' })).toBeVisible();
@@ -2864,7 +2889,7 @@ describe('VMcpDesigner.svelte', () => {
 
 		it('returns to the profiles list when creating a profile', async () => {
 			const onBack = vi.fn();
-			appPage.url.searchParams.set('view', 'profiles');
+			(appPage.url as URL).searchParams.set('view', 'profiles');
 			await renderDesigner([componentEntry], createIssueTrackerVMcp(), { onBack });
 
 			await page.getByRole('button', { name: 'Create profile', exact: true }).click();
@@ -2883,7 +2908,7 @@ describe('VMcpDesigner.svelte', () => {
 
 		it('returns to the profiles list when a profile is selected', async () => {
 			const onBack = vi.fn();
-			appPage.url.searchParams.set('view', 'profiles');
+			(appPage.url as URL).searchParams.set('view', 'profiles');
 			await renderDesigner([componentEntry], createIssueTrackerVMcp(), { onBack });
 
 			await page.getByRole('button', { name: 'Edit default' }).click();
